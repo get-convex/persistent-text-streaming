@@ -37,7 +37,13 @@ export function useStream(
   >,
   streamUrl: URL,
   driven: boolean,
-  streamId?: StreamId
+  streamId: StreamId | undefined,
+  opts?: {
+    // If provided, this will be passed as the Authorization header.
+    authToken?: string | null;
+    // If provided, these will be passed as additional headers.
+    headers?: Record<string, string>;
+  }
 ) {
   const [streamEnded, setStreamEnded] = useState(null as boolean | null);
 
@@ -56,10 +62,10 @@ export function useStream(
     // Otherwise, we'll try to drive the stream and use the HTTP response.
     return false;
   }, [driven, streamId, streamEnded]);
-//  console.log("usePersistence", usePersistence);
+  //  console.log("usePersistence", usePersistence);
   const persistentBody = useQuery(
     getPersistentBody,
-    usePersistence && streamId ? { streamId: streamId! } : "skip"
+    usePersistence && streamId ? { streamId } : "skip"
   );
   const [streamBody, setStreamBody] = useState<string>("");
 
@@ -67,9 +73,19 @@ export function useStream(
     if (driven && streamId && !streamStarted.current) {
       // Kick off HTTP action.
       void (async () => {
-        const success = await startStreaming(streamUrl, streamId, (text) => {
-          setStreamBody((prev) => prev + text);
-        });
+        const success = await startStreaming(
+          streamUrl,
+          streamId,
+          (text) => {
+            setStreamBody((prev) => prev + text);
+          },
+          {
+            ...opts?.headers,
+            ...(opts?.authToken
+              ? { Authorization: `Bearer ${opts.authToken}` }
+              : {}),
+          }
+        );
         setStreamEnded(success);
       })();
       // If we get remounted, we don't want to start a new stream.
@@ -119,14 +135,15 @@ export function useStream(
 async function startStreaming(
   url: URL,
   streamId: StreamId,
-  onUpdate: (text: string) => void
+  onUpdate: (text: string) => void,
+  headers: Record<string, string>
 ) {
   const response = await fetch(url, {
     method: "POST",
     body: JSON.stringify({
       streamId: streamId,
     }),
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
   // Adapted from https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams
   if (response.status === 205) {
