@@ -1,6 +1,7 @@
+import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { ConvexReactClient } from "convex/react";
 import App from "./App.tsx";
 import "./index.css";
 
@@ -10,8 +11,8 @@ const convex = new ConvexReactClient(address);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ConvexProvider client={convex}>
+    <ConvexAuthProvider client={convex}>
       <App />
-    </ConvexProvider>
+    </ConvexAuthProvider>
   </StrictMode>
 );

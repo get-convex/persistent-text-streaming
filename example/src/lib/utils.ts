@@ -30,5 +30,8 @@ export function getConvexSiteUrl() {
     url.port = String(Number(url.port) + 1);
     convexSiteUrl = url.toString();
   }
+  if (convexSiteUrl.endsWith("/")) {
+    convexSiteUrl = convexSiteUrl.slice(0, -1);
+  }
   return convexSiteUrl;
 }

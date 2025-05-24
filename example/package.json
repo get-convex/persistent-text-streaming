@@ -11,6 +11,8 @@
     "lint": "tsc -p convex && eslint convex"
   },
   "dependencies": {
+    "@auth/core": "^0.37.0",
+    "@convex-dev/auth": "^0.0.86",
     "@convex-dev/persistent-text-streaming": "file:..",
     "@tailwindcss/vite": "^4.0.9",
     "clsx": "^2.1.1",

@@ -7,6 +7,8 @@ import { streamingComponent } from "./streaming";
 const openai = new OpenAI();
 
 export const streamChat = httpAction(async (ctx, request) => {
+  const identity = await ctx.auth.getUserIdentity();
+  console.log("Logged in during http stream?", identity !== null);
   const body = (await request.json()) as {
     streamId: string;
   };
@@ -29,7 +31,7 @@ export const streamChat = httpAction(async (ctx, request) => {
             role: "system",
             content: `You are a helpful assistant that can answer questions and help with tasks.
           Please provide your response in markdown format.
-          
+
           You are continuing a conversation. The conversation so far is found in the following JSON-formatted value:`,
           },
           ...history,

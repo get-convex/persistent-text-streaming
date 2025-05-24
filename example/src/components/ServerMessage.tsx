@@ -5,6 +5,7 @@ import { api } from "../../convex/_generated/api";
 import { Doc } from "../../convex/_generated/dataModel";
 import { useMemo, useEffect } from "react";
 import Markdown from "react-markdown";
+import { useAuthToken } from "@convex-dev/auth/react";
 
 export function ServerMessage({
   message,
@@ -17,11 +18,14 @@ export function ServerMessage({
   stopStreaming: () => void;
   scrollToBottom: () => void;
 }) {
+  const authToken = useAuthToken();
+
   const { text, status } = useStream(
     api.streaming.getStreamBody,
     new URL(`${getConvexSiteUrl()}/chat-stream`),
     isDriven,
-    message.responseStreamId as StreamId
+    message.responseStreamId as StreamId,
+    { authToken }
   );
 
   const isCurrentlyStreaming = useMemo(() => {
