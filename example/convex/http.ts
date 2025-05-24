@@ -1,8 +1,10 @@
 import { httpRouter } from "convex/server";
 import { streamChat } from "./chat";
 import { httpAction } from "./_generated/server";
+import { auth } from "./auth";
 
 const http = httpRouter();
+auth.addHttpRoutes(http);
 
 http.route({
   path: "/chat-stream",
