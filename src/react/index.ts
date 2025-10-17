@@ -7,10 +7,6 @@ import { StreamBody, StreamId } from "../client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FunctionReference } from "convex/server";
 
-if (typeof window === "undefined") {
-  throw new Error("this is frontend code, but it's running somewhere else!");
-}
-
 /**
  * React hook for persistent text streaming.
  *
