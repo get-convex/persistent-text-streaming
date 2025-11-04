@@ -6,7 +6,7 @@ export const streamStatusValidator = v.union(
   v.literal("streaming"),
   v.literal("done"),
   v.literal("error"),
-  v.literal("timeout")
+  v.literal("timeout"),
 );
 export type StreamStatus = Infer<typeof streamStatusValidator>;
 

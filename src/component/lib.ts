@@ -56,7 +56,7 @@ export const setStreamStatus = mutation({
       v.literal("streaming"),
       v.literal("done"),
       v.literal("error"),
-      v.literal("timeout")
+      v.literal("timeout"),
     ),
   },
   handler: async (ctx, args) => {
@@ -67,7 +67,7 @@ export const setStreamStatus = mutation({
     if (stream.status !== "pending" && stream.status !== "streaming") {
       console.log(
         "Stream is already finalized; ignoring status change",
-        stream
+        stream,
       );
       return;
     }

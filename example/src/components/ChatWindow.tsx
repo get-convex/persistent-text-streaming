@@ -25,7 +25,7 @@ export default function ChatWindow() {
         messagesEndRef.current.scrollIntoView({ behavior });
       }
     },
-    [messagesEndRef]
+    [messagesEndRef],
   );
 
   const windowSize = useWindowSize();

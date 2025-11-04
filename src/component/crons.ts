@@ -7,7 +7,7 @@ const crons = cronJobs();
 crons.interval(
   "cleanup expired streams",
   { minutes: 1 },
-  internal.lib.cleanupExpiredStreams
+  internal.lib.cleanupExpiredStreams,
 );
 
 export default crons;

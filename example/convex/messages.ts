@@ -45,10 +45,10 @@ export const getHistory = internalQuery({
           userMessage,
           responseMessage: await streamingComponent.getStreamBody(
             ctx,
-            userMessage.responseStreamId as StreamId
+            userMessage.responseStreamId as StreamId,
           ),
         };
-      })
+      }),
     );
 
     return joinedResponses.flatMap((joined) => {

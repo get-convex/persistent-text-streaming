@@ -22,7 +22,7 @@ export type StreamWriter<A extends GenericActionCtx<GenericDataModel>> = (
   ctx: A,
   request: Request,
   streamId: StreamId,
-  chunkAppender: ChunkAppender
+  chunkAppender: ChunkAppender,
 ) => Promise<void>;
 
 // TODO -- make more flexible. # of bytes, etc?
@@ -34,7 +34,7 @@ const hasDelimeter = (text: string) => {
 export class PersistentTextStreaming {
   constructor(
     public component: UseApi<typeof api>,
-    public options?: object
+    public options?: object,
   ) {}
 
   /**
@@ -75,11 +75,11 @@ export class PersistentTextStreaming {
    */
   async getStreamBody(
     ctx: RunQueryCtx,
-    streamId: StreamId
+    streamId: StreamId,
   ): Promise<StreamBody> {
     const { text, status } = await ctx.runQuery(
       this.component.lib.getStreamText,
-      { streamId }
+      { streamId },
     );
     return { text, status: status as StreamStatus };
   }
@@ -109,7 +109,7 @@ export class PersistentTextStreaming {
     ctx: A,
     request: Request,
     streamId: StreamId,
-    streamWriter: StreamWriter<A>
+    streamWriter: StreamWriter<A>,
   ) {
     const streamState = await ctx.runQuery(this.component.lib.getStreamStatus, {
       streamId,
@@ -136,7 +136,7 @@ export class PersistentTextStreaming {
           } catch (e) {
             console.error("Error writing to stream", e);
             console.error(
-              "Will skip writing to stream but continue database updates"
+              "Will skip writing to stream but continue database updates",
             );
             writer = null;
           }
@@ -178,7 +178,7 @@ export class PersistentTextStreaming {
     ctx: RunMutationCtx,
     streamId: StreamId,
     text: string,
-    final: boolean
+    final: boolean,
   ) {
     await ctx.runMutation(this.component.lib.addChunk, {
       streamId,
@@ -191,7 +191,7 @@ export class PersistentTextStreaming {
   private async setStreamStatus(
     ctx: RunMutationCtx,
     streamId: StreamId,
-    status: StreamStatus
+    status: StreamStatus,
   ) {
     await ctx.runMutation(this.component.lib.setStreamStatus, {
       streamId,

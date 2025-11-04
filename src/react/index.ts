@@ -39,7 +39,7 @@ export function useStream(
     authToken?: string | null;
     // If provided, these will be passed as additional headers.
     headers?: Record<string, string>;
-  }
+  },
 ) {
   const [streamEnded, setStreamEnded] = useState(null as boolean | null);
 
@@ -61,7 +61,7 @@ export function useStream(
   //  console.log("usePersistence", usePersistence);
   const persistentBody = useQuery(
     getPersistentBody,
-    usePersistence && streamId ? { streamId } : "skip"
+    usePersistence && streamId ? { streamId } : "skip",
   );
   const [streamBody, setStreamBody] = useState<string>("");
 
@@ -80,7 +80,7 @@ export function useStream(
             ...(opts?.authToken
               ? { Authorization: `Bearer ${opts.authToken}` }
               : {}),
-          }
+          },
         );
         setStreamEnded(success);
       })();
@@ -140,7 +140,7 @@ async function startStreaming(
   url: URL,
   streamId: StreamId,
   onUpdate: (text: string) => void,
-  headers: Record<string, string>
+  headers: Record<string, string>,
 ) {
   const response = await fetch(url, {
     method: "POST",

@@ -7,7 +7,7 @@ import { components } from "./_generated/api";
 import { query } from "./_generated/server";
 
 export const streamingComponent = new PersistentTextStreaming(
-  components.persistentTextStreaming
+  components.persistentTextStreaming,
 );
 
 export const getStreamBody = query({
@@ -17,7 +17,7 @@ export const getStreamBody = query({
   handler: async (ctx, args) => {
     return await streamingComponent.getStreamBody(
       ctx,
-      args.streamId as StreamId
+      args.streamId as StreamId,
     );
   },
 });

@@ -23,7 +23,7 @@ export function getConvexSiteUrl() {
   if (import.meta.env.VITE_CONVEX_URL.includes(".cloud")) {
     convexSiteUrl = import.meta.env.VITE_CONVEX_URL.replace(
       /\.cloud$/,
-      ".site"
+      ".site",
     );
   } else {
     const url = new URL(import.meta.env.VITE_CONVEX_URL);

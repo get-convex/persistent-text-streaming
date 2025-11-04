@@ -40,7 +40,7 @@ export const streamChat = httpAction(async (ctx, request) => {
       // Append each chunk to the persistent stream as they come in from openai
       for await (const part of stream)
         await append(part.choices[0]?.delta?.content || "");
-    }
+    },
   );
 
   response.headers.set("Access-Control-Allow-Origin", "*");
