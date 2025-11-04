@@ -1,4 +1,4 @@
-import {
+import type {
   Expand,
   FunctionReference,
   GenericActionCtx,
@@ -6,9 +6,9 @@ import {
   GenericMutationCtx,
   GenericQueryCtx,
 } from "convex/server";
-import { GenericId, v } from "convex/values";
+import { v, type GenericId } from "convex/values";
 import { api } from "../component/_generated/api";
-import { StreamStatus } from "../component/schema";
+import type { StreamStatus } from "../component/schema";
 
 export type StreamId = string & { __isStreamId: true };
 export const StreamIdValidator = v.string();

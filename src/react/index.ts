@@ -1,11 +1,11 @@
 "use client";
 
 /// React helpers for persistent text streaming.
-import { StreamStatus } from "../component/schema";
+import type { StreamStatus } from "../component/schema";
 import { useQuery } from "convex/react";
-import { StreamBody, StreamId } from "../client";
+import type { StreamBody, StreamId } from "../client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FunctionReference } from "convex/server";
+import type { FunctionReference } from "convex/server";
 
 /**
  * React hook for persistent text streaming.
