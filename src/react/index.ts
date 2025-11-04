@@ -57,7 +57,7 @@ export function useStream(
     }
     // Otherwise, we'll try to drive the stream and use the HTTP response.
     return false;
-  }, [driven, streamId, streamEnded]);
+  }, [driven, streamEnded]);
   //  console.log("usePersistence", usePersistence);
   const persistentBody = useQuery(
     getPersistentBody,
@@ -89,7 +89,15 @@ export function useStream(
         streamStarted.current = true;
       };
     }
-  }, [driven, streamId, setStreamEnded, streamStarted]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    driven,
+    streamUrl,
+    streamId,
+    setStreamEnded,
+    streamStarted,
+    opts?.authToken,
+  ]);
 
   const body = useMemo<StreamBody>(() => {
     // console.log(
