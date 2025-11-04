@@ -4,9 +4,9 @@ import tailwindcss from "@tailwindcss/vite";
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  envDir: "../",
   plugins: [react(), tailwindcss()],
   resolve: {
-    conditions: ["@convex-dev/component-source"],
     alias: {
       "@": "/src",
     },

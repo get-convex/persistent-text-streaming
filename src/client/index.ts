@@ -122,7 +122,8 @@ export class PersistentTextStreaming {
     }
     // Create a TransformStream to handle streaming data
     const { readable, writable } = new TransformStream();
-    let writer = writable.getWriter() as WritableStreamDefaultWriter<Uint8Array> | null;
+    let writer =
+      writable.getWriter() as WritableStreamDefaultWriter<Uint8Array> | null;
     const textEncoder = new TextEncoder();
     let pending = "";
 
@@ -134,7 +135,9 @@ export class PersistentTextStreaming {
             await writer.write(textEncoder.encode(text));
           } catch (e) {
             console.error("Error writing to stream", e);
-            console.error("Will skip writing to stream but continue database updates");
+            console.error(
+              "Will skip writing to stream but continue database updates"
+            );
             writer = null;
           }
         }
