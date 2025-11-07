@@ -7,8 +7,8 @@ import type {
   GenericQueryCtx,
 } from "convex/server";
 import { v, type GenericId } from "convex/values";
-import { api } from "../component/_generated/api";
-import type { StreamStatus } from "../component/schema";
+import { api } from "../component/_generated/api.js";
+import type { StreamStatus } from "../component/schema.js";
 
 export type StreamId = string & { __isStreamId: true };
 export const StreamIdValidator = v.string();

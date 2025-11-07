@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
-import { streamStatusValidator } from "./schema";
+import { internalMutation, mutation, query } from "./_generated/server.js";
+import { streamStatusValidator } from "./schema.js";
 
 // Create a new stream with zero chunks.
 export const createStream = mutation({
