@@ -17,7 +17,7 @@ export function ServerMessage({
   stopStreaming: () => void;
   scrollToBottom: () => void;
 }) {
-  const { text, status } = useStream(
+  const { text, reasoning, status } = useStream(
     api.streaming.getStreamBody,
     new URL(`${getConvexSiteUrl()}/chat-stream`),
     isDriven,
@@ -42,7 +42,15 @@ export function ServerMessage({
 
   return (
     <div className="md-answer">
-      <Markdown>{text || "Thinking..."}</Markdown>
+      {reasoning && reasoning.length > 0 && (
+        <div className="mb-3 pb-3 border-b border-gray-200">
+          <div className="text-xs text-gray-500 mb-2">Reasoning:</div>
+          <div className="text-sm text-gray-600">
+            <Markdown>{reasoning}</Markdown>
+          </div>
+        </div>
+      )}
+      <Markdown>{text}</Markdown>
       {status === "error" && (
         <div className="text-red-500 mt-2">Error loading response</div>
       )}

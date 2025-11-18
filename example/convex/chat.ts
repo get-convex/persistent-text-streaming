@@ -21,25 +21,50 @@ export const streamChat = httpAction(async (ctx, request) => {
       // Lets grab the history up to now so that the AI has some context
       const history = await ctx.runQuery(internal.messages.getHistory);
 
-      // Lets kickoff a stream request to OpenAI
-      const stream = await openai.chat.completions.create({
-        model: "gpt-4.1-mini",
-        messages: [
+      // o4-mini works best with the Responses API for reasoning
+      const response = await (openai as any).responses.create({
+        model: "o4-mini",
+        input: [
           {
             role: "system",
             content: `You are a helpful assistant that can answer questions and help with tasks.
           Please provide your response in markdown format.
-          
+
           You are continuing a conversation. The conversation so far is found in the following JSON-formatted value:`,
           },
           ...history,
         ],
+        reasoning: {
+          effort: "medium",
+          summary: "auto", // Get reasoning summary
+        },
         stream: true,
       });
 
-      // Append each chunk to the persistent stream as they come in from openai
-      for await (const part of stream)
-        await append(part.choices[0]?.delta?.content || "");
+      let currentReasoning = "";
+      let currentText = "";
+
+      // Process the streaming response
+      for await (const event of response) {
+
+        // Handle reasoning summary chunks
+        if (event.type === "response.reasoning_summary_text.delta") {
+          currentReasoning += event.delta || "";
+          await append({
+            text: "",
+            reasoning: event.delta || "",
+          });
+        }
+
+        // Handle output text chunks
+        if (event.type === "response.output_text.delta") {
+          currentText += event.delta || "";
+          await append({
+            text: event.delta || "",
+            reasoning: "",
+          });
+        }
+      }
     },
   );
 

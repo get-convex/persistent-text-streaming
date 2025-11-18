@@ -27,7 +27,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       addChunk: FunctionReference<
         "mutation",
         "internal",
-        { final: boolean; streamId: string; text: string },
+        { final: boolean; reasoning?: string; streamId: string; text: string },
         any,
         Name
       >;
@@ -44,6 +44,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { streamId: string },
         {
+          reasoning: string;
           status: "pending" | "streaming" | "done" | "error" | "timeout";
           text: string;
         },

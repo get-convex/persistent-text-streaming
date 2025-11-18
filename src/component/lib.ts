@@ -20,6 +20,7 @@ export const addChunk = mutation({
   args: {
     streamId: v.id("streams"),
     text: v.string(),
+    reasoning: v.optional(v.string()),
     final: v.boolean(),
   },
   handler: async (ctx, args) => {
@@ -37,6 +38,7 @@ export const addChunk = mutation({
     await ctx.db.insert("chunks", {
       streamId: args.streamId,
       text: args.text,
+      reasoning: args.reasoning,
     });
     if (args.final) {
       await ctx.db.patch(args.streamId, {
@@ -97,6 +99,7 @@ export const getStreamText = query({
   },
   returns: v.object({
     text: v.string(),
+    reasoning: v.string(),
     status: streamStatusValidator,
   }),
   handler: async (ctx, args) => {
@@ -105,15 +108,18 @@ export const getStreamText = query({
       throw new Error("Stream not found");
     }
     let text = "";
+    let reasoning = "";
     if (stream.status !== "pending") {
       const chunks = await ctx.db
         .query("chunks")
         .withIndex("byStream", (q) => q.eq("streamId", args.streamId))
         .collect();
       text = chunks.map((chunk) => chunk.text).join("");
+      reasoning = chunks.map((chunk) => chunk.reasoning || "").join("");
     }
     return {
       text,
+      reasoning,
       status: stream.status,
     };
   },
