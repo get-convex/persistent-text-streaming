@@ -14,10 +14,12 @@ export type StreamId = string & { __isStreamId: true };
 export const StreamIdValidator = v.string();
 export type StreamBody = {
   text: string;
+  reasoning: string;
   status: StreamStatus;
 };
 
-export type ChunkAppender = (text: string) => Promise<void>;
+export type StreamChunk = string | { text: string; reasoning?: string };
+export type ChunkAppender = (chunk: StreamChunk) => Promise<void>;
 export type StreamWriter<A extends GenericActionCtx<GenericDataModel>> = (
   ctx: A,
   request: Request,
@@ -77,11 +79,15 @@ export class PersistentTextStreaming {
     ctx: RunQueryCtx,
     streamId: StreamId,
   ): Promise<StreamBody> {
-    const { text, status } = await ctx.runQuery(
+    const { text, reasoning, status } = await ctx.runQuery(
       this.component.lib.getStreamText,
       { streamId },
     );
-    return { text, status: status as StreamStatus };
+    return {
+      text,
+      reasoning: reasoning ?? "",
+      status: status as StreamStatus
+    };
   }
 
   /**
@@ -125,14 +131,19 @@ export class PersistentTextStreaming {
     let writer =
       writable.getWriter() as WritableStreamDefaultWriter<Uint8Array> | null;
     const textEncoder = new TextEncoder();
-    let pending = "";
+    let pending = { text: "", reasoning: "" };
 
     const doStream = async () => {
-      const chunkAppender: ChunkAppender = async (text) => {
+      const chunkAppender: ChunkAppender = async (chunk) => {
+        // Normalize input to object form
+        const normalized = typeof chunk === "string" ? { text: chunk } : chunk;
+
         // write to this handler's response stream on every update
         if (writer) {
           try {
-            await writer.write(textEncoder.encode(text));
+            await writer.write(textEncoder.encode(
+              JSON.stringify(normalized) + "\n"
+            ));
           } catch (e) {
             console.error("Error writing to stream", e);
             console.error(
@@ -141,11 +152,12 @@ export class PersistentTextStreaming {
             writer = null;
           }
         }
-        pending += text;
+        pending.text += normalized.text;
+        pending.reasoning += normalized.reasoning || "";
         // write to the database periodically, like at the end of sentences
-        if (hasDelimeter(text)) {
-          await this.addChunk(ctx, streamId, pending, false);
-          pending = "";
+        if (hasDelimeter(normalized.text)) {
+          await this.addChunk(ctx, streamId, pending.text, pending.reasoning, false);
+          pending = { text: "", reasoning: "" };
         }
       };
       try {
@@ -159,7 +171,7 @@ export class PersistentTextStreaming {
       }
 
       // Success? Flush any last updates
-      await this.addChunk(ctx, streamId, pending, true);
+      await this.addChunk(ctx, streamId, pending.text, pending.reasoning, true);
 
       if (writer) {
         await writer.close();
@@ -178,11 +190,13 @@ export class PersistentTextStreaming {
     ctx: RunMutationCtx,
     streamId: StreamId,
     text: string,
+    reasoning: string,
     final: boolean,
   ) {
     await ctx.runMutation(this.component.lib.addChunk, {
       streamId,
       text,
+      reasoning: reasoning || undefined,
       final,
     });
   }

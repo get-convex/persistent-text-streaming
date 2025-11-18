@@ -63,7 +63,7 @@ export function useStream(
     getPersistentBody,
     usePersistence && streamId ? { streamId } : "skip",
   );
-  const [streamBody, setStreamBody] = useState<string>("");
+  const [streamBody, setStreamBody] = useState({ text: "", reasoning: "" });
 
   useEffect(() => {
     if (driven && streamId && !streamStarted.current) {
@@ -72,8 +72,11 @@ export function useStream(
         const success = await startStreaming(
           streamUrl,
           streamId,
-          (text) => {
-            setStreamBody((prev) => prev + text);
+          (chunk) => {
+            setStreamBody((prev) => ({
+              text: prev.text + chunk.text,
+              reasoning: prev.reasoning + (chunk.reasoning || ""),
+            }));
           },
           {
             ...opts?.headers,
@@ -110,12 +113,13 @@ export function useStream(
     }
     let status: StreamStatus;
     if (streamEnded === null) {
-      status = streamBody.length > 0 ? "streaming" : "pending";
+      status = streamBody.text.length > 0 ? "streaming" : "pending";
     } else {
       status = streamEnded ? "done" : "error";
     }
     return {
-      text: streamBody,
+      text: streamBody.text,
+      reasoning: streamBody.reasoning,
       status: status as StreamStatus,
     };
   }, [persistentBody, streamBody, streamEnded]);
@@ -139,7 +143,7 @@ export function useStream(
 async function startStreaming(
   url: URL,
   streamId: StreamId,
-  onUpdate: (text: string) => void,
+  onUpdate: (chunk: { text: string; reasoning?: string }) => void,
   headers: Record<string, string>,
 ) {
   const response = await fetch(url, {
@@ -162,15 +166,41 @@ async function startStreaming(
     console.error("No body in response", response);
     return false;
   }
-  const reader = response.body.getReader();
+  
+  let buffer = '';
+  const lines = response.body
+    .pipeThrough(new TextDecoderStream())
+    .pipeThrough(new TransformStream<string, string>({
+      transform(chunk, controller) {
+        buffer += chunk;
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.trim()) {
+            controller.enqueue(line);
+          }
+        }
+      },
+      flush(controller) {
+        if (buffer.trim()) {
+          controller.enqueue(buffer);
+        }
+      }
+    }))
+    .getReader();
+
   while (true) {
     try {
-      const { done, value } = await reader.read();
+      const { done, value } = await lines.read();
       if (done) {
-        onUpdate(new TextDecoder().decode(value));
         return true;
       }
-      onUpdate(new TextDecoder().decode(value));
+      try {
+        const chunk = JSON.parse(value);
+        onUpdate(chunk);
+      } catch (e) {
+        console.error("Error parsing chunk", e, value);
+      }
     } catch (e) {
       console.error("Error reading stream", e);
       return false;
