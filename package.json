@@ -18,6 +18,7 @@
     "dev": "run-p -r 'dev:*'",
     "dev:backend": "convex dev --typecheck-components",
     "dev:frontend": "cd example && vite --clearScreen false",
+    "dev:svelte": "cd example-svelte && vite --clearScreen false",
     "dev:build": "chokidar 'tsconfig*.json' 'src/**/*.ts' -i '**/*.test.ts' -c 'convex codegen --component-dir ./src/component && npm run build' --initial",
     "predev": "npm run dev:backend -- --until-success",
     "clean": "rm -rf dist *.tsbuildinfo",
@@ -48,6 +49,11 @@
       "types": "./dist/react/index.d.ts",
       "default": "./dist/react/index.js"
     },
+    "./svelte": {
+      "types": "./src/svelte/index.svelte.ts",
+      "svelte": "./src/svelte/index.svelte.ts",
+      "default": "./src/svelte/index.svelte.ts"
+    },
     "./test": "./src/test.ts",
     "./_generated/component.js": {
       "types": "./dist/component/_generated/component.d.ts"
@@ -63,11 +69,28 @@
   },
   "peerDependencies": {
     "convex": "^1.24.8",
+    "convex-svelte": "^0.0.12",
     "react": "~18.3.1 || ^19.0.0",
-    "react-dom": "~18.3.1 || ^19.0.0"
+    "react-dom": "~18.3.1 || ^19.0.0",
+    "svelte": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "convex-svelte": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@edge-runtime/vm": "5.0.0",
+    "convex-svelte": "0.0.12",
     "@eslint/eslintrc": "3.3.1",
     "@eslint/js": "9.38.0",
     "@tailwindcss/vite": "4.1.16",
@@ -88,6 +111,7 @@
     "prettier": "3.6.2",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "svelte": "5.33.0",
     "react-markdown": "10.1.0",
     "tailwind-merge": "3.3.1",
     "tailwindcss": "4.1.16",
