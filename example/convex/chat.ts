@@ -22,7 +22,7 @@ export const streamChat = httpAction(async (ctx, request) => {
       const history = await ctx.runQuery(internal.messages.getHistory);
 
       // o4-mini works best with the Responses API for reasoning
-      const response = await (openai as any).responses.create({
+      const response = await openai.responses.create({
         model: "o4-mini",
         input: [
           {
