@@ -166,44 +166,74 @@ async function startStreaming(
     console.error("No body in response", response);
     return false;
   }
-  
-  let buffer = '';
-  const lines = response.body
-    .pipeThrough(new TextDecoderStream())
-    .pipeThrough(new TransformStream<string, string>({
-      transform(chunk, controller) {
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.trim()) {
-            controller.enqueue(line);
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+
+  // Read first chunk to detect format
+  const firstRead = await reader.read();
+  if (firstRead.done) {
+    return true;
+  }
+
+  const firstChunk = firstRead.value;
+  const isJsonMode = firstChunk.trimStart().startsWith("{");
+
+  if (isJsonMode) {
+    // JSON mode: split by newlines and parse each line
+    let buffer = firstChunk;
+
+    const processBuffer = () => {
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            onUpdate(JSON.parse(line));
+          } catch {
+            onUpdate({ text: line });
           }
         }
-      },
-      flush(controller) {
-        if (buffer.trim()) {
-          controller.enqueue(buffer);
-        }
       }
-    }))
-    .getReader();
+    };
 
-  while (true) {
-    try {
-      const { done, value } = await lines.read();
-      if (done) {
-        return true;
-      }
+    processBuffer();
+
+    while (true) {
       try {
-        const chunk = JSON.parse(value);
-        onUpdate(chunk);
+        const { done, value } = await reader.read();
+        if (done) {
+          // Flush remaining buffer
+          if (buffer.trim()) {
+            try {
+              onUpdate(JSON.parse(buffer));
+            } catch {
+              onUpdate({ text: buffer });
+            }
+          }
+          return true;
+        }
+        buffer += value;
+        processBuffer();
       } catch (e) {
-        console.error("Error parsing chunk", e, value);
+        console.error("Error reading stream", e);
+        return false;
       }
-    } catch (e) {
-      console.error("Error reading stream", e);
-      return false;
+    }
+  } else {
+    // Plain text mode: pass chunks through directly
+    onUpdate({ text: firstChunk });
+
+    while (true) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          return true;
+        }
+        onUpdate({ text: value });
+      } catch (e) {
+        console.error("Error reading stream", e);
+        return false;
+      }
     }
   }
 }
