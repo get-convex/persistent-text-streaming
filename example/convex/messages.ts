@@ -33,8 +33,10 @@ export const sendMessage = mutation({
 });
 
 export const getHistory = internalQuery({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    listItems: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { listItems}) => {
     // Grab all the user messages
     const allMessages = await ctx.db.query("userMessages").collect();
 
@@ -46,6 +48,7 @@ export const getHistory = internalQuery({
           responseMessage: await streamingComponent.getStreamBody(
             ctx,
             userMessage.responseStreamId as StreamId,
+            listItems,
           ),
         };
       }),
