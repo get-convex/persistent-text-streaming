@@ -63,7 +63,7 @@ export function useStream(
     getPersistentBody,
     usePersistence && streamId ? { streamId } : "skip",
   );
-  const [streamBody, setStreamBody] = useState<string>("");
+  const [streamBody, setStreamBody] = useState({ text: "", reasoning: "" });
 
   useEffect(() => {
     if (driven && streamId && !streamStarted.current) {
@@ -72,8 +72,11 @@ export function useStream(
         const success = await startStreaming(
           streamUrl,
           streamId,
-          (text) => {
-            setStreamBody((prev) => prev + text);
+          (chunk) => {
+            setStreamBody((prev) => ({
+              text: prev.text + chunk.text,
+              reasoning: prev.reasoning + (chunk.reasoning || ""),
+            }));
           },
           {
             ...opts?.headers,
@@ -110,12 +113,13 @@ export function useStream(
     }
     let status: StreamStatus;
     if (streamEnded === null) {
-      status = streamBody.length > 0 ? "streaming" : "pending";
+      status = streamBody.text.length > 0 ? "streaming" : "pending";
     } else {
       status = streamEnded ? "done" : "error";
     }
     return {
-      text: streamBody,
+      text: streamBody.text,
+      reasoning: streamBody.reasoning,
       status: status as StreamStatus,
     };
   }, [persistentBody, streamBody, streamEnded]);
@@ -139,7 +143,7 @@ export function useStream(
 async function startStreaming(
   url: URL,
   streamId: StreamId,
-  onUpdate: (text: string) => void,
+  onUpdate: (chunk: { text: string; reasoning?: string }) => void,
   headers: Record<string, string>,
 ) {
   const response = await fetch(url, {
@@ -162,18 +166,74 @@ async function startStreaming(
     console.error("No body in response", response);
     return false;
   }
-  const reader = response.body.getReader();
-  while (true) {
-    try {
-      const { done, value } = await reader.read();
-      if (done) {
-        onUpdate(new TextDecoder().decode(value));
-        return true;
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+
+  // Read first chunk to detect format
+  const firstRead = await reader.read();
+  if (firstRead.done) {
+    return true;
+  }
+
+  const firstChunk = firstRead.value;
+  const isJsonMode = firstChunk.trimStart().startsWith("{");
+
+  if (isJsonMode) {
+    // JSON mode: split by newlines and parse each line
+    let buffer = firstChunk;
+
+    const processBuffer = () => {
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            onUpdate(JSON.parse(line));
+          } catch {
+            onUpdate({ text: line });
+          }
+        }
       }
-      onUpdate(new TextDecoder().decode(value));
-    } catch (e) {
-      console.error("Error reading stream", e);
-      return false;
+    };
+
+    processBuffer();
+
+    while (true) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          // Flush remaining buffer
+          if (buffer.trim()) {
+            try {
+              onUpdate(JSON.parse(buffer));
+            } catch {
+              onUpdate({ text: buffer });
+            }
+          }
+          return true;
+        }
+        buffer += value;
+        processBuffer();
+      } catch (e) {
+        console.error("Error reading stream", e);
+        return false;
+      }
+    }
+  } else {
+    // Plain text mode: pass chunks through directly
+    onUpdate({ text: firstChunk });
+
+    while (true) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          return true;
+        }
+        onUpdate({ text: value });
+      } catch (e) {
+        console.error("Error reading stream", e);
+        return false;
+      }
     }
   }
 }
