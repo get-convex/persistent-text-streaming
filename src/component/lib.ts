@@ -1,7 +1,8 @@
+import { paginator } from "convex-helpers/server/pagination";
 import { v } from "convex/values";
 import { internal } from "./_generated/api.js";
 import { internalMutation, mutation, query } from "./_generated/server.js";
-import { streamStatusValidator } from "./schema.js";
+import schema, { streamStatusValidator } from "./schema.js";
 
 // Create a new stream with zero chunks.
 export const createStream = mutation({
@@ -139,6 +140,7 @@ export const deleteStream = mutation({
     await ctx.db.delete(args.streamId);
     await ctx.scheduler.runAfter(0, internal.lib._deleteChunksPage, {
       streamId: args.streamId,
+      cursor: null,
     });
   },
 });
@@ -147,19 +149,21 @@ export const deleteStream = mutation({
 export const _deleteChunksPage = internalMutation({
   args: {
     streamId: v.id("streams"),
+    cursor: v.union(v.string(), v.null()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const chunks = await ctx.db
+    const result = await paginator(ctx.db, schema)
       .query("chunks")
       .withIndex("byStream", (q) => q.eq("streamId", args.streamId))
-      .take(DELETE_BATCH_SIZE);
+      .paginate({ cursor: args.cursor, numItems: DELETE_BATCH_SIZE });
 
-    await Promise.all(chunks.map((chunk) => ctx.db.delete(chunk._id)));
+    await Promise.all(result.page.map((chunk) => ctx.db.delete(chunk._id)));
 
-    if (chunks.length === DELETE_BATCH_SIZE) {
+    if (!result.isDone) {
       await ctx.scheduler.runAfter(0, internal.lib._deleteChunksPage, {
         streamId: args.streamId,
+        cursor: result.continueCursor,
       });
     }
   },

@@ -99,5 +99,8 @@
     "vitest": "3.2.4"
   },
   "types": "./dist/client/index.d.ts",
-  "module": "./dist/client/index.js"
+  "module": "./dist/client/index.js",
+  "dependencies": {
+    "convex-helpers": "^0.1.114"
+  }
 }
