@@ -125,7 +125,7 @@ const BATCH_SIZE = 100;
 const DELETE_BATCH_SIZE = 64;
 
 // Delete a stream and all its chunks.
-// Kicks off async recursive deletion that processes chunks in batches.
+// The stream is deleted immediately; chunks are cleaned up asynchronously.
 export const deleteStream = mutation({
   args: {
     streamId: v.id("streams"),
@@ -134,16 +134,17 @@ export const deleteStream = mutation({
   handler: async (ctx, args) => {
     const stream = await ctx.db.get(args.streamId);
     if (!stream) {
-      return;
+      throw new Error(`Stream ${args.streamId} not found`);
     }
-    await ctx.scheduler.runAfter(0, internal.lib._deleteStreamPage, {
+    await ctx.db.delete(args.streamId);
+    await ctx.scheduler.runAfter(0, internal.lib._deleteChunksPage, {
       streamId: args.streamId,
     });
   },
 });
 
-// Internal: delete a page of chunks for a stream, then re-schedule if more remain.
-export const _deleteStreamPage = internalMutation({
+// Internal: delete a page of chunks for a deleted stream, re-scheduling if more remain.
+export const _deleteChunksPage = internalMutation({
   args: {
     streamId: v.id("streams"),
   },
@@ -156,15 +157,8 @@ export const _deleteStreamPage = internalMutation({
 
     await Promise.all(chunks.map((chunk) => ctx.db.delete(chunk._id)));
 
-    if (chunks.length < DELETE_BATCH_SIZE) {
-      // All chunks deleted, now delete the stream itself.
-      const stream = await ctx.db.get(args.streamId);
-      if (stream) {
-        await ctx.db.delete(args.streamId);
-      }
-    } else {
-      // More chunks remain, schedule another page.
-      await ctx.scheduler.runAfter(0, internal.lib._deleteStreamPage, {
+    if (chunks.length === DELETE_BATCH_SIZE) {
+      await ctx.scheduler.runAfter(0, internal.lib._deleteChunksPage, {
         streamId: args.streamId,
       });
     }
