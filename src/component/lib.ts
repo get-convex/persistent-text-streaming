@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { internal } from "./_generated/api.js";
 import { internalMutation, mutation, query } from "./_generated/server.js";
 import { streamStatusValidator } from "./schema.js";
 
@@ -121,6 +122,54 @@ export const getStreamText = query({
 
 const EXPIRATION_TIME = 20 * 60 * 1000; // 20 minutes in milliseconds
 const BATCH_SIZE = 100;
+const DELETE_BATCH_SIZE = 64;
+
+// Delete a stream and all its chunks.
+// Kicks off async recursive deletion that processes chunks in batches.
+export const deleteStream = mutation({
+  args: {
+    streamId: v.id("streams"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const stream = await ctx.db.get(args.streamId);
+    if (!stream) {
+      return;
+    }
+    await ctx.scheduler.runAfter(0, internal.lib._deleteStreamPage, {
+      streamId: args.streamId,
+    });
+  },
+});
+
+// Internal: delete a page of chunks for a stream, then re-schedule if more remain.
+export const _deleteStreamPage = internalMutation({
+  args: {
+    streamId: v.id("streams"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const chunks = await ctx.db
+      .query("chunks")
+      .withIndex("byStream", (q) => q.eq("streamId", args.streamId))
+      .take(DELETE_BATCH_SIZE);
+
+    await Promise.all(chunks.map((chunk) => ctx.db.delete(chunk._id)));
+
+    if (chunks.length < DELETE_BATCH_SIZE) {
+      // All chunks deleted, now delete the stream itself.
+      const stream = await ctx.db.get(args.streamId);
+      if (stream) {
+        await ctx.db.delete(args.streamId);
+      }
+    } else {
+      // More chunks remain, schedule another page.
+      await ctx.scheduler.runAfter(0, internal.lib._deleteStreamPage, {
+        streamId: args.streamId,
+      });
+    }
+  },
+});
 
 // If the last chunk of a stream was added more than 20 minutes ago,
 // set the stream to timeout. The action feeding it has to be dead.

@@ -173,6 +173,19 @@ export class PersistentTextStreaming {
     return new Response(readable);
   }
 
+  /**
+   * Delete a stream and all its chunks. Deletion happens asynchronously
+   * in batches, so this returns immediately.
+   *
+   * @param ctx - A convex context capable of running mutations.
+   * @param streamId - The ID of the stream to delete.
+   */
+  async deleteStream(ctx: RunMutationCtx, streamId: StreamId): Promise<void> {
+    await ctx.runMutation(this.component.lib.deleteStream, {
+      streamId,
+    });
+  }
+
   // Internal helper -- add a chunk to the stream.
   private async addChunk(
     ctx: RunMutationCtx,
