@@ -32,6 +32,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
       createStream: FunctionReference<"mutation", "internal", {}, any, Name>;
+      deleteStream: FunctionReference<
+        "mutation",
+        "internal",
+        { streamId: string },
+        null,
+        Name
+      >;
       getStreamStatus: FunctionReference<
         "query",
         "internal",
