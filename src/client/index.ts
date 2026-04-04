@@ -25,6 +25,15 @@ export type StreamWriter<A extends GenericActionCtx<GenericDataModel>> = (
   chunkAppender: ChunkAppender,
 ) => Promise<void>;
 
+export interface PersistentTextStreamingOptions {
+  /**
+   * How long (in ms) a stream may be idle before the cleanup cron marks
+   * it as timed-out.  Set to `null` to disable expiration entirely.
+   * When omitted the component defaults to 20 minutes.
+   */
+  expirationMs?: number | null;
+}
+
 // TODO -- make more flexible. # of bytes, etc?
 const hasDelimeter = (text: string) => {
   return text.includes(".") || text.includes("!") || text.includes("?");
@@ -32,10 +41,29 @@ const hasDelimeter = (text: string) => {
 
 // TODO -- some sort of wrapper with easy ergonomics for working with LLMs?
 export class PersistentTextStreaming {
+  private _configured = false;
+
   constructor(
     public component: UseApi<typeof api>,
-    public options?: object,
+    public options?: PersistentTextStreamingOptions,
   ) {}
+
+  /**
+   * Persist the expiration configuration into the component's database.
+   * This only needs to be called once (the setting is durable), but is
+   * safe to call repeatedly — it upserts a singleton config document.
+   *
+   * If `options.expirationMs` was provided to the constructor this is
+   * called automatically on the first `createStream` invocation.
+   */
+  async configure(ctx: RunMutationCtx): Promise<void> {
+    const expirationMs = this.options?.expirationMs;
+    if (expirationMs === undefined) return;
+    await ctx.runMutation(this.component.lib.configure, {
+      expirationMs,
+    });
+    this._configured = true;
+  }
 
   /**
    * Create a new stream. This will return a stream ID that can be used
@@ -56,6 +84,9 @@ export class PersistentTextStreaming {
    */
 
   async createStream(ctx: RunMutationCtx): Promise<StreamId> {
+    if (!this._configured && this.options?.expirationMs !== undefined) {
+      await this.configure(ctx);
+    }
     const id = await ctx.runMutation(this.component.lib.createStream);
     return id as StreamId;
   }
