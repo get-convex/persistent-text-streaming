@@ -14,10 +14,11 @@ export type StreamId = string & { __isStreamId: true };
 export const StreamIdValidator = v.string();
 export type StreamBody = {
   text: string;
+  textList: string[];
   status: StreamStatus;
 };
 
-export type ChunkAppender = (text: string) => Promise<void>;
+export type ChunkAppender = (text: string, isObjectOrJson?: boolean) => Promise<void>;
 export type StreamWriter<A extends GenericActionCtx<GenericDataModel>> = (
   ctx: A,
   request: Request,
@@ -70,18 +71,19 @@ export class PersistentTextStreaming {
    * @example
    * ```ts
    * const streaming = new PersistentTextStreaming(api);
-   * const { text, status } = await streaming.getStreamBody(ctx, streamId);
+   * const { text, textList, status } = await streaming.getStreamBody(ctx, streamId);
    * ```
    */
   async getStreamBody(
     ctx: RunQueryCtx,
     streamId: StreamId,
+    listItems?: boolean,
   ): Promise<StreamBody> {
-    const { text, status } = await ctx.runQuery(
+    const { text, status, textList } = await ctx.runQuery(
       this.component.lib.getStreamText,
-      { streamId },
+      { streamId, listItems },
     );
-    return { text, status: status as StreamStatus };
+    return { text, textList, status: status as StreamStatus };
   }
 
   /**
@@ -110,6 +112,7 @@ export class PersistentTextStreaming {
     request: Request,
     streamId: StreamId,
     streamWriter: StreamWriter<A>,
+    
   ) {
     const streamState = await ctx.runQuery(this.component.lib.getStreamStatus, {
       streamId,
@@ -128,7 +131,7 @@ export class PersistentTextStreaming {
     let pending = "";
 
     const doStream = async () => {
-      const chunkAppender: ChunkAppender = async (text) => {
+      const chunkAppender: ChunkAppender = async (text, isObjectOrJson) => {
         // write to this handler's response stream on every update
         if (writer) {
           try {
@@ -143,7 +146,10 @@ export class PersistentTextStreaming {
         }
         pending += text;
         // write to the database periodically, like at the end of sentences
-        if (hasDelimeter(text)) {
+        // When isObjectOrJson is true, the response is not a text, we do not
+        // need to do a delimiter check as the result may be inaccurate.
+        // In this case, we will add the chunk to the database, short circuiting the delimiter check.
+        if (isObjectOrJson || hasDelimeter(text)) {
           await this.addChunk(ctx, streamId, pending, false);
           pending = "";
         }
@@ -158,8 +164,11 @@ export class PersistentTextStreaming {
         throw e;
       }
 
-      // Success? Flush any last updates
-      await this.addChunk(ctx, streamId, pending, true);
+      // Do not add an empty chunk to the database.
+      if (pending) {
+        // Success? Flush any last updates
+        await this.addChunk(ctx, streamId, pending, true);
+      }
 
       if (writer) {
         await writer.close();

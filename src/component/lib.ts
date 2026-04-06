@@ -94,9 +94,11 @@ export const getStreamStatus = query({
 export const getStreamText = query({
   args: {
     streamId: v.id("streams"),
+    listItems: v.optional(v.boolean()),
   },
   returns: v.object({
     text: v.string(),
+    textList: v.array(v.string()),
     status: streamStatusValidator,
   }),
   handler: async (ctx, args) => {
@@ -105,15 +107,20 @@ export const getStreamText = query({
       throw new Error("Stream not found");
     }
     let text = "";
+    let textList: string[] = [];
     if (stream.status !== "pending") {
       const chunks = await ctx.db
         .query("chunks")
         .withIndex("byStream", (q) => q.eq("streamId", args.streamId))
         .collect();
       text = chunks.map((chunk) => chunk.text).join("");
+      if (args.listItems) {
+        textList = chunks.map((chunk) => chunk.text);
+      }
     }
     return {
       text,
+      textList,
       status: stream.status,
     };
   },

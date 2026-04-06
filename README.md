@@ -84,17 +84,19 @@ export const createChat = mutation({
 export const getChatBody = query({
   args: {
     streamId: StreamIdValidator,
+    listItems: v.optional(v.boolean()), // Return chunks as textList array
   },
   handler: async (ctx, args) => {
     return await persistentTextStreaming.getStreamBody(
       ctx,
       args.streamId as StreamId,
+      args.listItems,
     );
   },
 });
 
-// Create an HTTP action that generates chunks of the chat body
-// and uses the component to stream them to the client and save them to the database.
+// Create an HTTP action that generates chunks and uses the component to stream
+// them to the client and persist to the database.
 export const streamChat = httpAction(async (ctx, request) => {
   const body = (await request.json()) as { streamId: string };
   const generateChat = async (ctx, request, streamId, chunkAppender) => {
@@ -152,6 +154,53 @@ const { text, status } = useStream(
   driven, // True if this browser session created this chat and should generate the stream
   chat.streamId as StreamId, // The streamId from the chat database record
 );
+```
+
+## Non-text (object/JSON) streaming
+
+For structured or JSON streaming:
+
+1. **Chunk appender**: Pass `true` as the second argument when a chunk is a complete object/JSON so each chunk is persisted immediately (no sentence-delimiter batching).
+2. **List items**: Pass `listItems: true` to your body query so `getStreamBody` returns `textList` (array of chunks). Consume `textList` on the client.
+
+**Backend** — stream JSON lines and return them as a list:
+
+```ts
+// In your HTTP action (e.g. streamItems):
+const streamItems = httpAction(async (ctx, request) => {
+  const body = (await request.json()) as { streamId: string };
+  const generate = async (ctx, request, streamId, chunkAppender) => {
+    const items = [{ id: 1, name: "a" }, { id: 2, name: "b" }];
+    for (const item of items) {
+      await chunkAppender(JSON.stringify(item), true); // true = persist each chunk now
+    }
+  };
+  return await persistentTextStreaming.stream(ctx, request, body.streamId as StreamId, generate);
+});
+
+// Query with listItems so body has textList
+export const getItemList = query({
+  args: { streamId: StreamIdValidator, listItems: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    return await persistentTextStreaming.getStreamBody(
+      ctx,
+      args.streamId as StreamId,
+      args.listItems ?? true, // return chunks as textList for structured data
+    );
+  },
+});
+```
+
+**Frontend** — subscribe and parse each chunk as JSON:
+
+```ts
+const { textList, status } = useStream(
+  api.chat.getItemList,
+  new URL(`${convexSiteUrl}/chat-stream`),
+  driven,
+  streamId,
+);
+const items = textList.map((line) => JSON.parse(line) as { id: number; name: string });
 ```
 
 ## Design Philosophy

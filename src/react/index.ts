@@ -39,6 +39,8 @@ export function useStream(
     authToken?: string | null;
     // If provided, these will be passed as additional headers.
     headers?: Record<string, string>;
+    // Return the stream as an array / list of items.
+    listItems?: boolean; // Default is false.
   },
 ) {
   const [streamEnded, setStreamEnded] = useState(null as boolean | null);
@@ -64,6 +66,7 @@ export function useStream(
     usePersistence && streamId ? { streamId } : "skip",
   );
   const [streamBody, setStreamBody] = useState<string>("");
+  const [streamBodyAsList, setStreamBodyAsList] = useState<string[]>([]);
 
   useEffect(() => {
     if (driven && streamId && !streamStarted.current) {
@@ -74,6 +77,7 @@ export function useStream(
           streamId,
           (text) => {
             setStreamBody((prev) => prev + text);
+            setStreamBodyAsList((prev) => [...prev, text]);
           },
           {
             ...opts?.headers,
@@ -116,9 +120,10 @@ export function useStream(
     }
     return {
       text: streamBody,
+      textList: streamBodyAsList,
       status: status as StreamStatus,
     };
-  }, [persistentBody, streamBody, streamEnded]);
+  }, [persistentBody, streamBody, streamBodyAsList, streamEnded]);
 
   return body;
 }
