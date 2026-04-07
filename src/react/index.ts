@@ -41,10 +41,12 @@ export function useStream(
     headers?: Record<string, string>;
   },
 ) {
-  const [streamEnded, setStreamEnded] = useState(null as boolean | null);
+  const [streamBody, setStreamBody] = useState<string>("");
+  const [streamEnded, setStreamEnded] = useState<boolean | null>(null);
 
-  // Used to prevent strict mode from causing multiple streams to be started.
-  const streamStarted = useRef(false);
+  // Track the active streamId to handle multiple streams and serve as a
+  // Strict Mode guard (prevents double-firing when the same streamId is seen).
+  const activeStreamRef = useRef<StreamId | undefined>(undefined);
 
   const usePersistence = useMemo(() => {
     // Something is wrong with the stream, so we need to use the database value.
@@ -58,53 +60,88 @@ export function useStream(
     // Otherwise, we'll try to drive the stream and use the HTTP response.
     return false;
   }, [driven, streamEnded]);
-  //  console.log("usePersistence", usePersistence);
+
   const persistentBody = useQuery(
     getPersistentBody,
     usePersistence && streamId ? { streamId } : "skip",
   );
-  const [streamBody, setStreamBody] = useState<string>("");
 
   useEffect(() => {
-    if (driven && streamId && !streamStarted.current) {
-      // Kick off HTTP action.
-      void (async () => {
-        const success = await startStreaming(
-          streamUrl,
-          streamId,
-          (text) => {
-            setStreamBody((prev) => prev + text);
-          },
-          {
+    if (!driven || !streamId) {
+      return;
+    }
+
+    // Strict Mode guard: don't restart streaming for the same streamId
+    if (streamId === activeStreamRef.current) {
+      return;
+    }
+
+    // New stream: reset state and track the new streamId
+    activeStreamRef.current = streamId;
+    setStreamBody("");
+    setStreamEnded(null);
+
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const response = await fetch(streamUrl, {
+          method: "POST",
+          body: JSON.stringify({ streamId }),
+          headers: {
+            "Content-Type": "application/json",
             ...opts?.headers,
             ...(opts?.authToken
               ? { Authorization: `Bearer ${opts.authToken}` }
               : {}),
           },
-        );
-        setStreamEnded(success);
-      })();
-      // If we get remounted, we don't want to start a new stream.
-      return () => {
-        streamStarted.current = true;
-      };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    driven,
-    streamUrl,
-    streamId,
-    setStreamEnded,
-    streamStarted,
-    opts?.authToken,
-  ]);
+          signal: controller.signal,
+        });
+
+        if (response.status === 205) {
+          console.error("Stream already finished", response);
+          setStreamEnded(false);
+          return;
+        }
+        if (!response.ok) {
+          console.error("Failed to reach streaming endpoint", response);
+          setStreamEnded(false);
+          return;
+        }
+        if (!response.body) {
+          console.error("No body in response", response);
+          setStreamEnded(false);
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          const text = decoder.decode(value, { stream: !done });
+          if (text) {
+            setStreamBody((prev) => prev + text);
+          }
+          if (done) {
+            setStreamEnded(true);
+            return;
+          }
+        }
+      } catch (e) {
+        if (!controller.signal.aborted) {
+          console.error("Error reading stream", e);
+          setStreamEnded(false);
+        }
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [driven, streamId, streamUrl, opts?.authToken, opts?.headers]);
 
   const body = useMemo<StreamBody>(() => {
-    // console.log(
-    //   "body info p vs. s",
-    //   persistentBody?.text?.length ?? 0,
-    //   streamBody.length
-    //);
     if (persistentBody) {
       return persistentBody;
     }
@@ -123,57 +160,3 @@ export function useStream(
   return body;
 }
 
-/**
- * Internal helper for starting a stream.
- *
- * @param url - The URL of the http action that will kick off the stream
- * generation and stream the result back to the client using the component's
- * `stream` method.
- * @param streamId - The ID of the stream.
- * @param onUpdate - A function that updates the stream body.
- * @returns A promise that resolves to a boolean indicating whether the stream
- * was started successfully. It can fail if the http action is not found, or
- * CORS fails, or an exception is raised, or the stream is already running
- * or finished, etc.
- */
-async function startStreaming(
-  url: URL,
-  streamId: StreamId,
-  onUpdate: (text: string) => void,
-  headers: Record<string, string>,
-) {
-  const response = await fetch(url, {
-    method: "POST",
-    body: JSON.stringify({
-      streamId: streamId,
-    }),
-    headers: { "Content-Type": "application/json", ...headers },
-  });
-  // Adapted from https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams
-  if (response.status === 205) {
-    console.error("Stream already finished", response);
-    return false;
-  }
-  if (!response.ok) {
-    console.error("Failed to reach streaming endpoint", response);
-    return false;
-  }
-  if (!response.body) {
-    console.error("No body in response", response);
-    return false;
-  }
-  const reader = response.body.getReader();
-  while (true) {
-    try {
-      const { done, value } = await reader.read();
-      if (done) {
-        onUpdate(new TextDecoder().decode(value));
-        return true;
-      }
-      onUpdate(new TextDecoder().decode(value));
-    } catch (e) {
-      console.error("Error reading stream", e);
-      return false;
-    }
-  }
-}
