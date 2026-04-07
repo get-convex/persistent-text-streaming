@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Support deleting old streams asynchronously
+
 ## 0.3.0
 
 - Adds /test and /\_generated/component.js entrypoints
