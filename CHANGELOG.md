@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Enables streaming multiple times per hook
+
 ## 0.3.1
 
 - Support deleting old streams asynchronously
