@@ -25,12 +25,12 @@ export const addChunk = mutation({
     final: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const stream = await ctx.db.get(args.streamId);
+    const stream = await ctx.db.get("streams", args.streamId);
     if (!stream) {
       throw new Error("Stream not found");
     }
     if (stream.status === "pending") {
-      await ctx.db.patch(args.streamId, {
+      await ctx.db.patch("streams", args.streamId, {
         status: "streaming",
       });
     } else if (stream.status !== "streaming") {
@@ -41,7 +41,7 @@ export const addChunk = mutation({
       text: args.text,
     });
     if (args.final) {
-      await ctx.db.patch(args.streamId, {
+      await ctx.db.patch("streams", args.streamId, {
         status: "done",
       });
     }
@@ -62,7 +62,7 @@ export const setStreamStatus = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const stream = await ctx.db.get(args.streamId);
+    const stream = await ctx.db.get("streams", args.streamId);
     if (!stream) {
       throw new Error("Stream not found");
     }
@@ -73,7 +73,7 @@ export const setStreamStatus = mutation({
       );
       return;
     }
-    await ctx.db.patch(args.streamId, {
+    await ctx.db.patch("streams", args.streamId, {
       status: args.status,
     });
   },
@@ -86,7 +86,7 @@ export const getStreamStatus = query({
   },
   returns: streamStatusValidator,
   handler: async (ctx, args) => {
-    const stream = await ctx.db.get(args.streamId);
+    const stream = await ctx.db.get("streams", args.streamId);
     return stream?.status ?? "error";
   },
 });
@@ -102,7 +102,7 @@ export const getStreamText = query({
     status: streamStatusValidator,
   }),
   handler: async (ctx, args) => {
-    const stream = await ctx.db.get(args.streamId);
+    const stream = await ctx.db.get("streams", args.streamId);
     if (!stream) {
       throw new Error("Stream not found");
     }
@@ -133,11 +133,11 @@ export const deleteStream = mutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const stream = await ctx.db.get(args.streamId);
+    const stream = await ctx.db.get("streams", args.streamId);
     if (!stream) {
       throw new Error(`Stream ${args.streamId} not found`);
     }
-    await ctx.db.delete(args.streamId);
+    await ctx.db.delete("streams", args.streamId);
     await ctx.scheduler.runAfter(0, internal.lib._deleteChunksPage, {
       streamId: args.streamId,
       cursor: null,
@@ -158,7 +158,7 @@ export const _deleteChunksPage = internalMutation({
       .withIndex("byStream", (q) => q.eq("streamId", args.streamId))
       .paginate({ cursor: args.cursor, numItems: DELETE_BATCH_SIZE });
 
-    await Promise.all(result.page.map((chunk) => ctx.db.delete(chunk._id)));
+    await Promise.all(result.page.map((chunk) => ctx.db.delete("chunks", chunk._id)));
 
     if (!result.isDone) {
       await ctx.scheduler.runAfter(0, internal.lib._deleteChunksPage, {
@@ -187,7 +187,7 @@ export const cleanupExpiredStreams = internalMutation({
     for (const stream of [...pendingStreams, ...streamingStreams]) {
       if (now - stream._creationTime > EXPIRATION_TIME) {
         console.log("Cleaning up expired stream", stream._id);
-        await ctx.db.patch(stream._id, {
+        await ctx.db.patch("streams", stream._id, {
           status: "timeout",
         });
       }
