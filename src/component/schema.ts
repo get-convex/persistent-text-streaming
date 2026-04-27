@@ -13,9 +13,13 @@ export type StreamStatus = Infer<typeof streamStatusValidator>;
 export default defineSchema({
   streams: defineTable({
     status: streamStatusValidator,
+    lastActivityTime: v.optional(v.number()),
   }).index("byStatus", ["status"]),
   chunks: defineTable({
     streamId: v.id("streams"),
     text: v.string(),
   }).index("byStream", ["streamId"]),
+  streamConfig: defineTable({
+    expirationMs: v.optional(v.union(v.number(), v.null())),
+  }),
 });
