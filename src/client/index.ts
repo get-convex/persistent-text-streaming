@@ -55,7 +55,7 @@ export class PersistentTextStreaming {
    * ```
    */
 
-  async createStream(ctx: RunMutationCtx): Promise<StreamId> {
+  async createStream(ctx: MutationCtx | ActionCtx): Promise<StreamId> {
     const id = await ctx.runMutation(this.component.lib.createStream);
     return id as StreamId;
   }
@@ -74,7 +74,7 @@ export class PersistentTextStreaming {
    * ```
    */
   async getStreamBody(
-    ctx: RunQueryCtx,
+    ctx: QueryCtx | MutationCtx | ActionCtx,
     streamId: StreamId,
   ): Promise<StreamBody> {
     const { text, status } = await ctx.runQuery(
@@ -180,7 +180,10 @@ export class PersistentTextStreaming {
    * @param ctx - A convex context capable of running mutations.
    * @param streamId - The ID of the stream to delete.
    */
-  async deleteStream(ctx: RunMutationCtx, streamId: StreamId): Promise<void> {
+  async deleteStream(
+    ctx: MutationCtx | ActionCtx,
+    streamId: StreamId,
+  ): Promise<void> {
     await ctx.runMutation(this.component.lib.deleteStream, {
       streamId,
     });
@@ -188,7 +191,7 @@ export class PersistentTextStreaming {
 
   // Internal helper -- add a chunk to the stream.
   private async addChunk(
-    ctx: RunMutationCtx,
+    ctx: MutationCtx | ActionCtx,
     streamId: StreamId,
     text: string,
     final: boolean,
@@ -202,7 +205,7 @@ export class PersistentTextStreaming {
 
   // Internal helper -- set the status of a stream.
   private async setStreamStatus(
-    ctx: RunMutationCtx,
+    ctx: MutationCtx | ActionCtx,
     streamId: StreamId,
     status: StreamStatus,
   ) {
@@ -215,12 +218,15 @@ export class PersistentTextStreaming {
 
 /* Type utils follow */
 
-type RunQueryCtx = {
-  runQuery: GenericQueryCtx<GenericDataModel>["runQuery"];
-};
-type RunMutationCtx = {
-  runMutation: GenericMutationCtx<GenericDataModel>["runMutation"];
-};
+type QueryCtx = Pick<GenericQueryCtx<GenericDataModel>, "runQuery">;
+type MutationCtx = Pick<
+  GenericMutationCtx<GenericDataModel>,
+  "runQuery" | "runMutation"
+>;
+type ActionCtx = Pick<
+  GenericActionCtx<GenericDataModel>,
+  "runQuery" | "runMutation" | "runAction"
+>;
 
 export type OpaqueIds<T> = T extends GenericId<infer _T> | string
   ? string
