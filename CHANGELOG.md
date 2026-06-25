@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- Update ctx types for convex@1.41+
+
 ## 0.3.2
 
 - Enables streaming multiple times per hook
