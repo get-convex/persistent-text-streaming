@@ -61,7 +61,7 @@
     }
   },
   "peerDependencies": {
-    "convex": "^1.32.0",
+    "convex": "^1.39.0",
     "react": "~18.3.1 || ^19.0.0",
     "react-dom": "~18.3.1 || ^19.0.0"
   },
@@ -74,11 +74,12 @@
     "@types/node": "20.19.39",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/react-test-renderer": "19.1.0",
     "@vitejs/plugin-react": "6.0.1",
     "chokidar-cli": "3.0.0",
     "clsx": "2.1.1",
-    "convex": "1.35.1",
-    "convex-test": "0.0.48",
+    "convex": "1.42.2",
+    "convex-test": "0.0.54",
     "eslint": "9.39.4",
     "eslint-plugin-react-hooks": "7.0.1",
     "eslint-plugin-react-refresh": "0.5.2",
@@ -89,6 +90,7 @@
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "react-markdown": "10.1.0",
+    "react-test-renderer": "19.2.5",
     "tailwind-merge": "3.5.0",
     "tailwindcss": "4.2.2",
     "typescript": "5.9.3",
@@ -99,6 +101,7 @@
   "types": "./dist/client/index.d.ts",
   "module": "./dist/client/index.js",
   "dependencies": {
+    "@convex-dev/stream": "https://pkg.pr.new/get-convex/stream/@convex-dev/stream@b153faa",
     "convex-helpers": "^0.1.114"
   }
 }
