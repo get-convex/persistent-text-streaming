@@ -25,6 +25,8 @@
     "typecheck": "tsc --noEmit && tsc -p example && tsc -p example/convex",
     "lint": "eslint .",
     "test": "vitest run --typecheck",
+    "pretest:occ:real": "npm run build",
+    "test:occ:real": "node scripts/run-occ-integration.mjs",
     "test:watch": "vitest --typecheck --clearScreen false",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:coverage": "vitest run --coverage --coverage.reporter=text",
