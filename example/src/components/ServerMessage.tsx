@@ -22,6 +22,7 @@ export function ServerMessage({
     new URL(`${getConvexSiteUrl()}/chat-stream`),
     isDriven,
     message.responseStreamId as StreamId,
+    { readStream: api.streaming.readStream },
   );
 
   const isCurrentlyStreaming = useMemo(() => {
