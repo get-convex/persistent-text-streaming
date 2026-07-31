@@ -6,6 +6,7 @@ import type {
   GenericMutationCtx,
   GenericQueryCtx,
 } from "convex/server";
+import type { StreamQueryArgs, StreamReadResult } from "@convex-dev/stream";
 import { v, type GenericId } from "convex/values";
 import { api } from "../component/_generated/api.js";
 import type { StreamStatus } from "../component/schema.js";
@@ -25,10 +26,145 @@ export type StreamWriter<A extends GenericActionCtx<GenericDataModel>> = (
   chunkAppender: ChunkAppender,
 ) => Promise<void>;
 
-// TODO -- make more flexible. # of bytes, etc?
-const hasDelimeter = (text: string) => {
+const FLUSH_MS = 100;
+const MAX_BATCH_BYTES = 16 * 1024;
+const MAX_RAW_BUFFER_BYTES = 64 * 1024;
+const encoder = new TextEncoder();
+
+function shouldFlush(text: string): boolean {
   return text.includes(".") || text.includes("!") || text.includes("?");
+}
+
+function splitText(text: string): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  let index = 0;
+  let bytes = 0;
+
+  for (const character of text) {
+    const size = encoder.encode(character).byteLength;
+    if (bytes > 0 && bytes + size > MAX_BATCH_BYTES) {
+      chunks.push(text.slice(start, index));
+      start = index;
+      bytes = 0;
+    }
+    bytes += size;
+    index += character.length;
+  }
+  if (start < text.length) chunks.push(text.slice(start));
+  return chunks;
+}
+
+type Sink = {
+  write(text: string): void;
+  close(): void;
+  error(error: unknown): void;
 };
+
+class Batch {
+  private parts: string[] = [];
+  private bytes = 0;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private queue = Promise.resolve();
+  private ended = false;
+
+  constructor(
+    private readonly appendChunk: (
+      text: string,
+      final: boolean,
+    ) => Promise<void>,
+    private readonly setStatus: (status: StreamStatus) => Promise<void>,
+    private readonly sink: Sink,
+  ) {}
+
+  add(text: string): Promise<void> {
+    if (this.ended)
+      return Promise.reject(new Error("Stream is already finalized."));
+    const next = this.queue.then(() => this.accept(text));
+    this.queue = next;
+    return next;
+  }
+
+  finish(): Promise<void> {
+    if (this.ended) return this.queue;
+    this.ended = true;
+    this.stopTimer();
+    const next = this.queue.then(async () => {
+      this.stopTimer();
+      if (this.parts.length === 0) {
+        await this.setStatus("done");
+      } else {
+        await this.flush(true);
+      }
+    });
+    this.queue = next;
+    return next;
+  }
+
+  fail(): Promise<void> {
+    this.ended = true;
+    this.stopTimer();
+    const prior = this.queue;
+    const next = (async () => {
+      try {
+        await prior;
+        this.stopTimer();
+        await this.flush(false);
+      } finally {
+        await this.setStatus("error");
+      }
+    })();
+    this.queue = next;
+    return next;
+  }
+
+  private async accept(text: string): Promise<void> {
+    if (text.length === 0) return;
+    const chunks = splitText(text);
+    for (const chunk of chunks) this.sink.write(chunk);
+
+    for (const chunk of chunks) {
+      const size = encoder.encode(chunk).byteLength;
+      if (this.bytes > 0 && this.bytes + size > MAX_BATCH_BYTES) {
+        await this.flush(false);
+      }
+      this.parts.push(chunk);
+      this.bytes += size;
+      if (this.bytes >= MAX_BATCH_BYTES) await this.flush(false);
+    }
+
+    if (shouldFlush(text)) await this.flush(false);
+    else this.startTimer();
+  }
+
+  private async flush(final: boolean): Promise<void> {
+    this.stopTimer();
+    if (this.parts.length === 0) {
+      if (final) await this.setStatus("done");
+      return;
+    }
+    const text = this.parts.join("");
+    this.parts = [];
+    this.bytes = 0;
+    await this.appendChunk(text, final);
+  }
+
+  private startTimer(): void {
+    if (this.parts.length === 0 || this.timer !== null) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      const next = this.queue.then(() => this.flush(false));
+      this.queue = next;
+      void next.catch(() => undefined);
+    }, FLUSH_MS);
+  }
+
+  private stopTimer(): void {
+    if (this.timer === null) return;
+    clearTimeout(this.timer);
+    this.timer = null;
+  }
+}
 
 // TODO -- some sort of wrapper with easy ergonomics for working with LLMs?
 export class PersistentTextStreaming {
@@ -110,67 +246,139 @@ export class PersistentTextStreaming {
     request: Request,
     streamId: StreamId,
     streamWriter: StreamWriter<A>,
-  ) {
-    const streamState = await ctx.runQuery(this.component.lib.getStreamStatus, {
+  ): Promise<Response> {
+    const { claimed } = await ctx.runMutation(this.component.lib.claim, {
       streamId,
     });
-    if (streamState !== "pending") {
-      console.log("Stream was already started");
-      return new Response("", {
-        status: 205,
-      });
-    }
-    // Create a TransformStream to handle streaming data
-    const { readable, writable } = new TransformStream();
-    let writer =
-      writable.getWriter() as WritableStreamDefaultWriter<Uint8Array> | null;
-    const textEncoder = new TextEncoder();
-    let pending = "";
+    if (!claimed) return new Response(null, { status: 205 });
 
-    const doStream = async () => {
-      const chunkAppender: ChunkAppender = async (text) => {
-        // write to this handler's response stream on every update
-        if (writer) {
+    let connected = true;
+    const readable = new ReadableStream<Uint8Array>(
+      {
+        start: async (controller) => {
+          const sink: Sink = {
+            write(text) {
+              if (!connected) return;
+              const chunk = encoder.encode(text);
+              const capacity = controller.desiredSize;
+              if (capacity === null || capacity < chunk.byteLength) {
+                connected = false;
+                try {
+                  controller.error(
+                    new Error(
+                      "Raw stream consumer fell behind durable replay.",
+                    ),
+                  );
+                } catch {
+                  // The response consumer has already disconnected.
+                }
+                return;
+              }
+              try {
+                controller.enqueue(chunk);
+                if ((controller.desiredSize ?? 0) <= 0) {
+                  connected = false;
+                  controller.error(
+                    new Error(
+                      "Raw stream consumer fell behind durable replay.",
+                    ),
+                  );
+                }
+              } catch {
+                connected = false;
+              }
+            },
+            close() {
+              if (!connected) return;
+              connected = false;
+              try {
+                controller.close();
+              } catch {
+                // The response consumer has already disconnected.
+              }
+            },
+            error(error) {
+              if (!connected) return;
+              connected = false;
+              try {
+                controller.error(error);
+              } catch {
+                // The response consumer has already disconnected.
+              }
+            },
+          };
+          const batch = new Batch(
+            (text, final) => this.addChunk(ctx, streamId, text, final),
+            (status) => this.setStreamStatus(ctx, streamId, status),
+            sink,
+          );
+
           try {
-            await writer.write(textEncoder.encode(text));
-          } catch (e) {
-            console.error("Error writing to stream", e);
-            console.error(
-              "Will skip writing to stream but continue database updates",
+            await streamWriter(ctx, request, streamId, (text) =>
+              batch.add(text),
             );
-            writer = null;
+            await batch.finish();
+            sink.close();
+          } catch (error) {
+            let failure = error;
+            try {
+              await batch.fail();
+            } catch (persistenceError) {
+              failure = persistenceError;
+            }
+            sink.error(failure);
           }
-        }
-        pending += text;
-        // write to the database periodically, like at the end of sentences
-        if (hasDelimeter(text)) {
-          await this.addChunk(ctx, streamId, pending, false);
-          pending = "";
-        }
-      };
-      try {
-        await streamWriter(ctx, request, streamId, chunkAppender);
-      } catch (e) {
-        await this.setStreamStatus(ctx, streamId, "error");
-        if (writer) {
-          await writer.close();
-        }
-        throw e;
-      }
+        },
+        cancel() {
+          connected = false;
+        },
+      },
+      {
+        highWaterMark: MAX_RAW_BUFFER_BYTES,
+        size: (chunk) => chunk.byteLength,
+      },
+    );
 
-      // Success? Flush any last updates
-      await this.addChunk(ctx, streamId, pending, true);
+    return new Response(readable, {
+      headers: {
+        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  }
 
-      if (writer) {
-        await writer.close();
-      }
-    };
-
-    // Kick off the streaming, but don't await it.
-    void doStream();
-
-    // Send the readable back to the browser
-    return new Response(readable);
+  /**
+   * Read one bounded page of a stream's ordered text events.
+   *
+   * Expose this from an app-owned query so followers can subscribe over the
+   * normal Convex websocket instead of re-reading the whole body on every
+   * append. Authorize the caller in that query exactly as you would for
+   * `getStreamBody`; this method performs no access control of its own.
+   *
+   * @param ctx - A convex context capable of running queries.
+   * @param streamId - The ID of the stream to read.
+   * @param streamArgs - The cursor and page size supplied by `useStream`.
+   * @returns One forward-only page plus the stream's lifecycle.
+   * @example
+   * ```ts
+   * export const readStream = query({
+   *   args: { streamId: StreamIdValidator, streamArgs: streamQueryArgsValidator },
+   *   handler: (ctx, { streamId, streamArgs }) =>
+   *     streaming.readStream(ctx, streamId as StreamId, streamArgs),
+   * });
+   * ```
+   */
+  async readStream(
+    ctx: QueryCtx | MutationCtx | ActionCtx,
+    streamId: StreamId,
+    streamArgs: StreamQueryArgs,
+  ): Promise<StreamReadResult<string, string>> {
+    return (await ctx.runQuery(this.component.lib.read, {
+      streamId,
+      cursor: streamArgs.cursor,
+      numItems: streamArgs.numItems,
+    })) as StreamReadResult<string, string>;
   }
 
   /**
