@@ -67,4 +67,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    streamMaintenance: {
+      run: FunctionReference<
+        "mutation",
+        "internal",
+        { streamId?: string; sweep?: boolean },
+        { isDone: boolean },
+        Name
+      >;
+    };
   };

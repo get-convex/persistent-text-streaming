@@ -10,6 +10,7 @@
 
 import type * as crons from "../crons.js";
 import type * as lib from "../lib.js";
+import type * as streamMaintenance from "../streamMaintenance.js";
 
 import type {
   ApiFromModules,
@@ -21,6 +22,7 @@ import { anyApi, componentsGeneric } from "convex/server";
 const fullApi: ApiFromModules<{
   crons: typeof crons;
   lib: typeof lib;
+  streamMaintenance: typeof streamMaintenance;
 }> = anyApi as any;
 
 /**

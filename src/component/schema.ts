@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v, type Infer } from "convex/values";
+import { textStreams } from "./streams.js";
 
 export const streamStatusValidator = v.union(
   v.literal("pending"),
@@ -18,4 +19,5 @@ export default defineSchema({
     streamId: v.id("streams"),
     text: v.string(),
   }).index("byStream", ["streamId"]),
+  ...textStreams.tables(),
 });
