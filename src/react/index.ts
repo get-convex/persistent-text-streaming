@@ -1,11 +1,39 @@
 "use client";
 
 /// React helpers for persistent text streaming.
-import type { StreamStatus } from "../component/schema.js";
+import type { StreamQueryArgs, StreamReadResult } from "@convex-dev/stream";
+import { useStream as useStreamQuery } from "@convex-dev/stream/react";
 import { useQuery } from "convex/react";
-import type { StreamBody, StreamId } from "../client/index.js";
-import { useEffect, useMemo, useRef, useState } from "react";
 import type { FunctionReference } from "convex/server";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import type { StreamBody, StreamId } from "../client/index.js";
+import { publicStatus } from "./status.js";
+import { startTextTransport } from "./transport.js";
+
+const EMPTY_BODY: StreamBody = { text: "", status: "pending" };
+// Page size for one durable read. Each page is a bounded delta, never the
+// whole body, so this caps the work of a single query execution.
+const READ_ITEMS = 16;
+
+/**
+ * An app-owned query that exposes `PersistentTextStreaming.readStream`.
+ */
+export type StreamTextQuery = FunctionReference<
+  "query",
+  "public",
+  { streamId: string; streamArgs: StreamQueryArgs },
+  StreamReadResult<string, string>
+>;
+
+function stableHeaders(
+  authToken: string | null | undefined,
+  headers: Record<string, string> | undefined,
+): Record<string, string> {
+  const value = new Headers(headers);
+  if (authToken) value.set("Authorization", `Bearer ${authToken}`);
+  return Object.fromEntries(value.entries());
+}
 
 /**
  * React hook for persistent text streaming.
@@ -39,124 +67,115 @@ export function useStream(
     authToken?: string | null;
     // If provided, these will be passed as additional headers.
     headers?: Record<string, string>;
+    // An app-owned query exposing `readStream`. When provided, followers and
+    // recovery read bounded append-only pages over the normal Convex
+    // subscription instead of re-reading the full body on every append.
+    readStream?: StreamTextQuery;
   },
 ) {
-  const [streamBody, setStreamBody] = useState<string>("");
-  const [streamEnded, setStreamEnded] = useState<boolean | null>(null);
+  const url = streamUrl.toString();
+  const transportKey = JSON.stringify({
+    driven,
+    streamId: streamId ?? null,
+    url,
+  });
 
-  // Track the active streamId to handle multiple streams and serve as a
-  // Strict Mode guard (prevents double-firing when the same streamId is seen).
-  const activeStreamRef = useRef<StreamId | undefined>(undefined);
+  // Headers ride along with each request rather than keying the transport. An
+  // auth token that rotates mid-stream must not tear down a live connection or
+  // blank the text the reader is watching.
+  const headersKey = JSON.stringify(
+    stableHeaders(opts?.authToken, opts?.headers),
+  );
+  const headers = useMemo(
+    () => JSON.parse(headersKey) as Record<string, string>,
+    [headersKey],
+  );
+  const headersRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    headersRef.current = headers;
+  }, [headers]);
 
-  const usePersistence = useMemo(() => {
-    // Something is wrong with the stream, so we need to use the database value.
-    if (streamEnded === false) {
-      return true;
-    }
-    // If we're not driving the stream, we must use the database value.
-    if (!driven) {
-      return true;
-    }
-    // Otherwise, we'll try to drive the stream and use the HTTP response.
-    return false;
-  }, [driven, streamEnded]);
+  const [view, setView] = useState<{ body: StreamBody; key: string }>(() => ({
+    body: EMPTY_BODY,
+    key: transportKey,
+  }));
+  const [durableKey, setDurableKey] = useState<string | null>(null);
+  const generationRef = useRef(0);
 
+  // A passive client never drives, so it reads durably from the first render.
+  const readDurably = !driven || durableKey === transportKey;
+  const readStream = opts?.readStream;
+  const canRead = readDurably && streamId !== undefined;
+
+  // Rules of hooks require an unconditional call. When the app has not adopted
+  // `readStream` the args are always "skip", so the placeholder is never run.
+  const snapshot = useStreamQuery(
+    (readStream ?? getPersistentBody) as unknown as StreamTextQuery,
+    canRead && readStream !== undefined ? { streamId } : "skip",
+    { numItems: READ_ITEMS, maxEvents: null, maxBytes: null },
+  );
+
+  // Compatibility path for apps that have not exposed `readStream`, and the
+  // last resort when the durable read itself cannot resolve.
   const persistentBody = useQuery(
     getPersistentBody,
-    usePersistence && streamId ? { streamId } : "skip",
+    canRead && readStream === undefined ? { streamId } : "skip",
   );
 
   useEffect(() => {
-    if (!driven || !streamId) {
-      return;
-    }
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    if (!driven || !streamId) return;
 
-    // Strict Mode guard: don't restart streaming for the same streamId
-    if (streamId === activeStreamRef.current) {
-      return;
-    }
-
-    // New stream: reset state and track the new streamId
-    activeStreamRef.current = streamId;
-    setStreamBody("");
-    setStreamEnded(null);
-
-    const controller = new AbortController();
-
-    void (async () => {
-      try {
-        const response = await fetch(streamUrl, {
-          method: "POST",
-          body: JSON.stringify({ streamId }),
-          headers: {
-            "Content-Type": "application/json",
-            ...opts?.headers,
-            ...(opts?.authToken
-              ? { Authorization: `Bearer ${opts.authToken}` }
-              : {}),
-          },
-          signal: controller.signal,
-        });
-
-        if (response.status === 205) {
-          console.error("Stream already finished", response);
-          setStreamEnded(false);
-          return;
-        }
-        if (!response.ok) {
-          console.error("Failed to reach streaming endpoint", response);
-          setStreamEnded(false);
-          return;
-        }
-        if (!response.body) {
-          console.error("No body in response", response);
-          setStreamEnded(false);
-          return;
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        for (;;) {
-          const { done, value } = await reader.read();
-          const text = decoder.decode(value, { stream: !done });
-          if (text) {
-            setStreamBody((prev) => prev + text);
-          }
-          if (done) {
-            setStreamEnded(true);
-            return;
-          }
-        }
-      } catch (e) {
-        if (!controller.signal.aborted) {
-          console.error("Error reading stream", e);
-          setStreamEnded(false);
-        }
-      }
-    })();
+    const isCurrent = () => generationRef.current === generation;
+    const transport = startTextTransport(
+      { headers: headersRef.current, streamId, url },
+      {
+        publish(body) {
+          if (isCurrent()) setView({ body, key: transportKey });
+        },
+        handoff() {
+          if (isCurrent()) setDurableKey(transportKey);
+        },
+        report(error) {
+          if (isCurrent())
+            console.error("Persistent text stream transport failed", error);
+        },
+      },
+    );
 
     return () => {
-      controller.abort();
+      generationRef.current += 1;
+      transport.close();
     };
-  }, [driven, streamId, streamUrl, opts?.authToken, opts?.headers]);
+  }, [driven, streamId, transportKey, url]);
 
-  const body = useMemo<StreamBody>(() => {
-    if (persistentBody) {
-      return persistentBody;
-    }
-    let status: StreamStatus;
-    if (streamEnded === null) {
-      status = streamBody.length > 0 ? "streaming" : "pending";
-    } else {
-      status = streamEnded ? "done" : "error";
-    }
-    return {
-      text: streamBody,
-      status: status as StreamStatus,
-    };
-  }, [persistentBody, streamBody, streamEnded]);
+  const durableText = useMemo(
+    () => snapshot.events.map((event) => event.event).join(""),
+    [snapshot.events],
+  );
 
-  return body;
+  return useMemo<StreamBody>(() => {
+    const raw = view.key === transportKey ? view.body : EMPTY_BODY;
+    if (!canRead) return raw;
+    if (readStream === undefined) return persistentBody ?? raw;
+    if (snapshot.status === null) return raw;
+
+    // Durable replay restarts at zero and the raw text is a prefix of it, so
+    // hold the raw prefix until the replay has caught up rather than rewinding
+    // the reader to an empty message.
+    const status = publicStatus(snapshot.status, snapshot.error);
+    if (!snapshot.isDone && durableText.length < raw.text.length) return raw;
+    return { text: durableText, status };
+  }, [
+    canRead,
+    durableText,
+    persistentBody,
+    readStream,
+    snapshot.error,
+    snapshot.isDone,
+    snapshot.status,
+    transportKey,
+    view,
+  ]);
 }
-

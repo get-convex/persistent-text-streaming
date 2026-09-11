@@ -11,6 +11,10 @@ export const streamChat = httpAction(async (ctx, request) => {
     streamId: string;
   };
 
+  // This demo is public. Production apps must authenticate the caller and
+  // verify access to the app record that owns body.streamId before calling
+  // stream(), which starts generation and bills the producer.
+
   // Start streaming and persisting at the same time while
   // we immediately return a streaming response to the client
   const response = await streamingComponent.stream(

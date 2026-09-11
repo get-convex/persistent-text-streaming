@@ -4,214 +4,290 @@
 
 <!-- START: Include on https://convex.dev/components -->
 
-This Convex component enables persistent text streaming. It provides a React
-hook for streaming text from HTTP actions while simultaneously storing the data
-in the database. This persistence allows the text to be accessed after the
-stream ends or by other users.
+Persistent Text Streaming sends generated text to one browser with low latency,
+stores it in Convex, and lets other browsers follow the durable stream. It is
+designed for AI chat, but it works with any text producer.
 
-The most common use case is for AI chat applications. The example app (found in
-the `example` directory) is a just such a simple chat app that demonstrates use
-of the component.
+The component uses two paths behind the existing API:
 
-Here's what you'll end up with! The left browser window is streaming the chat
-body to the client, and the right browser window is subscribed to the chat body
-via a database query. The message is only updated in the database on sentence
-boundaries, whereas the HTTP stream sends tokens as they come:
+- The driving browser receives raw text over HTTP as the producer emits it.
+- Everyone else -- followers, reloads, and recovery -- subscribes to bounded
+  append-only pages over the normal Convex websocket. No HTTP request, and no
+  resending the whole body on every append.
+
+An atomic claim allows only one request to run the producer. A duplicate driving
+request receives the existing `205` response and reads durably instead.
 
 ![example-animation](./anim.gif)
 
-## Pre-requisite: Convex
+## Prerequisite
 
-You'll need an existing Convex project to use the component. Convex is a hosted
-backend platform, including a database, serverless functions, and a ton more you
-can learn about [here](https://docs.convex.dev/get-started).
-
-Run `npm create convex` or follow any of the
-[quickstarts](https://docs.convex.dev/home) to set one up.
+Add this component to an existing [Convex](https://convex.dev) project. You can
+create one with `npm create convex` or follow a
+[Convex quickstart](https://docs.convex.dev/home).
 
 ## Installation
 
-See [`example/`](./example/convex/) for a working demo.
-
-1. Install the Persistent Text Streaming component:
+Install the package:
 
 ```bash
 npm install @convex-dev/persistent-text-streaming
 ```
 
-2. Create a [`convex.config.ts`](./example/convex/convex.config.ts) file in your
-   app's `convex/` folder and install the component by calling `use`:
+This release requires Convex 1.39 or newer.
+
+Register the component in `convex/convex.config.ts`:
 
 ```ts
-// convex/convex.config.ts
-import { defineApp } from "convex/server";
 import persistentTextStreaming from "@convex-dev/persistent-text-streaming/convex.config.js";
+import { defineApp } from "convex/server";
 
 const app = defineApp();
 app.use(persistentTextStreaming);
 export default app;
 ```
 
-## Usage
+See [`example/`](./example/) for a complete app.
 
-Here's a simple example of how to use the component:
+## Backend setup
 
-In `convex/chat.ts`:
+Create one client for the component:
 
 ```ts
-const persistentTextStreaming = new PersistentTextStreaming(
+// convex/streaming.ts
+import {
+  PersistentTextStreaming,
+  StreamId,
+  StreamIdValidator,
+} from "@convex-dev/persistent-text-streaming";
+import { streamQueryArgsValidator } from "@convex-dev/stream";
+import { components } from "./_generated/api";
+import { query } from "./_generated/server";
+
+export const streaming = new PersistentTextStreaming(
   components.persistentTextStreaming,
 );
 
-// Create a stream using the component and store the id in the database with
-// our chat message.
+// The full-body query remains part of the public API for history and server
+// logic. The React hook uses it only when `readStream` is not provided.
+export const getStreamBody = query({
+  args: { streamId: StreamIdValidator },
+  handler: async (ctx, { streamId }) =>
+    streaming.getStreamBody(ctx, streamId as StreamId),
+});
+
+// Followers and recovery subscribe here. Authorize the caller exactly as you
+// do for getStreamBody -- this query returns persisted assistant text.
+export const readStream = query({
+  args: { streamId: StreamIdValidator, streamArgs: streamQueryArgsValidator },
+  handler: async (ctx, { streamId, streamArgs }) =>
+    streaming.readStream(ctx, streamId as StreamId, streamArgs),
+});
+```
+
+Create a stream and store its opaque ID in an app-owned record:
+
+```ts
 export const createChat = mutation({
-  args: {
-    prompt: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const streamId = await persistentTextStreaming.createStream(ctx);
-    const chatId = await ctx.db.insert("chats", {
-      title: "...",
-      prompt: args.prompt,
-      stream: streamId,
-    });
-    return chatId;
+  args: { prompt: v.string() },
+  handler: async (ctx, { prompt }) => {
+    const streamId = await streaming.createStream(ctx);
+    return ctx.db.insert("chats", { prompt, streamId });
   },
 });
+```
 
-// Create a query that returns the chat body.
-export const getChatBody = query({
-  args: {
-    streamId: StreamIdValidator,
-  },
-  handler: async (ctx, args) => {
-    return await persistentTextStreaming.getStreamBody(
-      ctx,
-      args.streamId as StreamId,
-    );
-  },
-});
+Create the HTTP action that produces text:
 
-// Create an HTTP action that generates chunks of the chat body
-// and uses the component to stream them to the client and save them to the database.
+```ts
 export const streamChat = httpAction(async (ctx, request) => {
-  const body = (await request.json()) as { streamId: string };
-  const generateChat = async (ctx, request, streamId, chunkAppender) => {
-    await chunkAppender("Hi there!");
-    await chunkAppender("How are you?");
-    await chunkAppender("Pretend I'm an AI or something!");
-  };
+  const { streamId } = (await request.json()) as { streamId: string };
 
-  const response = await persistentTextStreaming.stream(
+  // Required in production: authenticate the caller and verify that this
+  // stream belongs to a record the caller may read or generate. Do this before
+  // calling stream(). The component cannot infer your app's ownership rules.
+
+  const response = await streaming.stream(
     ctx,
     request,
-    body.streamId as StreamId,
-    generateChat,
+    streamId as StreamId,
+    async (_ctx, _request, _streamId, append) => {
+      await append("Hi there! ");
+      await append("How are you?");
+    },
   );
 
-  // Set CORS headers appropriately.
   response.headers.set("Access-Control-Allow-Origin", "*");
   response.headers.set("Vary", "Origin");
   return response;
 });
 ```
 
-You need to expose this HTTP endpoint in your backend, so in `convex/http.ts`:
+`stream()` keeps the same signature:
 
 ```ts
-http.route({
-  path: "/chat-stream",
-  method: "POST",
-  handler: streamChat,
-});
+stream(ctx, request, streamId, writer): Promise<Response>
+```
 
-// Handle CORS preflight requests so browsers will allow the POST above when
-// your app is served from a different origin than your Convex deployment.
+Only the driving browser calls this route, and only to generate text. It is not
+a read endpoint.
+
+## HTTP route and CORS
+
+Register POST and OPTIONS routes:
+
+```ts
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+import { streamChat } from "./chat";
+
+const http = httpRouter();
+
+http.route({ path: "/chat-stream", method: "POST", handler: streamChat });
+
 http.route({
   path: "/chat-stream",
   method: "OPTIONS",
-  handler: httpAction(async (_, request) => {
-    const headers = request.headers;
-    if (
-      headers.get("Origin") !== null &&
-      headers.get("Access-Control-Request-Method") !== null &&
-      headers.get("Access-Control-Request-Headers") !== null
-    ) {
-      return new Response(null, {
+  handler: httpAction(
+    async () =>
+      new Response(null, {
         headers: new Headers({
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "POST",
           "Access-Control-Allow-Headers": "Content-Type, Digest, Authorization",
           "Access-Control-Max-Age": "86400",
         }),
-      });
-    } else {
-      return new Response();
-    }
-  }),
+      }),
+  ),
 });
+
+export default http;
 ```
 
-Finally, in your app, you can now create chats and them subscribe to them via
-stream and/or database query as optimal:
+Add every custom request header to `Access-Control-Allow-Headers`. Only the
+driving browser reaches this route; followers never leave the websocket, so no
+additional CORS configuration is required to read a stream.
+
+For production, replace `*` with your frontend origin. CORS controls browser
+access; it does not authenticate or authorize a request.
+
+## React
 
 ```ts
-// chat-input.tsx, maybe?
-const createChat = useMutation(api.chat.createChat);
-const formSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  const chatId = await createChat({
-    prompt: inputValue,
-  });
-};
-
-// chat-message.tsx, maybe?
 import { useStream } from "@convex-dev/persistent-text-streaming/react";
 
-// ...
-
-// In our component:
 const { text, status } = useStream(
-  api.chat.getChatBody, // The query to call for the full stream body
-  new URL(`${convexSiteUrl}/chat-stream`), // The HTTP endpoint for streaming
-  driven, // True if this browser session created this chat and should generate the stream
-  chat.streamId as StreamId, // The streamId from the chat database record
+  api.streaming.getStreamBody,
+  new URL(`${convexSiteUrl}/chat-stream`),
+  driven,
+  chat.streamId as StreamId,
+  {
+    readStream: api.streaming.readStream,
+    authToken,
+    headers: { "X-Workspace": workspaceId },
+  },
 );
 ```
 
-## Design Philosophy
+Its signature is:
 
-This component balances HTTP streaming with database persistence to try to
-maximize the benefits of both. To understand why this balance is beneficial,
-let's examine each approach in isolation.
+```ts
+useStream(
+  getPersistentBody,
+  streamUrl,
+  driven,
+  streamId,
+  opts?,
+): StreamBody
+```
 
-- **HTTP streaming only**: If your app _only_ uses HTTP streaming, then the
-  original browser that made the request will have a great, high-performance
-  streaming experience. But if that HTTP connection is lost, if the browser
-  window is reloaded, if other users want to view the same chat, or this users
-  wants to revisit the conversation later, it won't be possible. The
-  conversation is only ephemeral because it was never stored on the server.
+- `getPersistentBody` returns the whole body in one query. It is the read path
+  when `opts.readStream` is absent.
+- `driven` tells this browser to try the producer path. The atomic server claim,
+  not this boolean, decides which request may generate text.
+- `opts.readStream` is the app-owned query described above. Provide it to read
+  bounded pages instead of the whole body on every append.
+- `opts.authToken` sends `Authorization: Bearer <token>` on the drive request.
+- `opts.headers` sends additional app headers on the drive request.
 
-- **Database Persistence Only**: If your app _only_ uses database persistence,
-  it's true that the conversation will be available for as long as you want.
-  Additionally, Convex's subscriptions will ensure the chat message is updated
-  as new text chunks are generated. However, there are a few downsides: one, the
-  entire chat body needs to be resent every time it is changed, which is a lot
-  redundant bandwidth to push into the database and over the websockets to all
-  connected clients. Two, you'll need to make a difficult tradeoff between
-  interactivity and efficiency. If you write every single small chunk to the
-  database, this will get quite slow and expensive. But if you batch up the
-  chunks into, say, paragraphs, then the user experience will feel laggy.
+A token that rotates mid-stream does not restart the transport or clear the text
+already on screen.
 
-This component combines the best of both worlds. The original browser that makes
-the request will still have a great, high-performance streaming experience. But
-the chat body is also stored in the database, so it can be accessed by the
-client even after the stream has finished, or by other users, etc.
+## Security
+
+Both entry points return or generate assistant text, and both need your own
+authorization:
+
+- The HTTP action can invoke an LLM or another costly producer.
+- `readStream` returns persisted assistant text.
+
+Authenticate the request, resolve the app record that stores `streamId`, and
+verify the caller may access it. Never treat `driven` or possession of a
+`StreamId` as authorization. The atomic claim prevents duplicate producers; it
+is not an authorization check.
+
+`readStream` is an ordinary Convex query, so the check belongs in its handler
+alongside the one you already have in `getStreamBody`.
+
+## Performance and recovery
+
+The driving response sends raw text immediately. Persistence runs through a
+single ordered queue and flushes at sentence punctuation, after about 100 ms, or
+at 16 KiB. Producer failures flush pending text before recording `error`.
+
+Followers subscribe to append-only pages of at most 16 events rather than to the
+complete growing string. A query invalidation therefore reads and sends only the
+delta, where the previous release re-read every chunk and re-sent the whole body
+on every append. The React client publishes visible text at a fixed cadence of
+about 50 ms rather than once per model token.
+
+If the raw drive connection fails, the driving browser switches to the same
+durable read as every other client. The replay restarts at the beginning of the
+stream but does not rewind what is already on screen: the raw text is a prefix
+of the durable text, so it stays visible until the replay passes it.
+
+`getStreamBody()` still returns the complete stored text and status in one
+Convex query for history, server logic, and compatibility. It is therefore
+subject to Convex transaction and value limits and is not suitable for unbounded
+output. Prefer `readStream` for live text.
+
+## Storage upgrades
+
+Upgrading requires no data migration and no API signature changes. Apps should
+add the `readStream` query and pass it to `useStream`; without it the hook keeps
+the previous full-body read behavior.
+
+- New streams store ordered events and lifecycle state through
+  `@convex-dev/stream`.
+- Existing `StreamId` values remain valid.
+- Streams created by older releases keep their legacy chunk rows and remain
+  readable, writable, followable, and deletable.
+- In-flight legacy producers can finish while new clients follow their output.
+
+The component selects the storage path from the stable stream record. It does
+not rewrite or discard existing assistant text.
+
+## Public API
+
+Every existing signature is unchanged; `readStream` and the matching `opts`
+field are additive:
+
+```ts
+new PersistentTextStreaming(component, options?)
+createStream(ctx): Promise<StreamId>
+getStreamBody(ctx, streamId): Promise<StreamBody>
+readStream(ctx, streamId, streamArgs): Promise<StreamReadResult<string, string>>
+stream(ctx, request, streamId, writer): Promise<Response>
+deleteStream(ctx, streamId): Promise<void>
+useStream(getPersistentBody, streamUrl, driven, streamId, opts?): StreamBody
+```
+
+`StreamBody.status` is `pending`, `streaming`, `done`, `error`, or `timeout`.
 
 ## Background
 
-This component is largely based on the Stack post
+This component builds on
 [AI Chat with HTTP Streaming](https://stack.convex.dev/ai-chat-with-http-streaming).
 
 <!-- END: Include on https://convex.dev/components -->

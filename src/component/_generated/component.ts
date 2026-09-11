@@ -9,6 +9,7 @@
  */
 
 import type { FunctionReference } from "convex/server";
+import type { StreamReadResult } from "@convex-dev/stream";
 
 /**
  * A utility for referencing a Convex component's exposed API.
@@ -32,6 +33,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
       createStream: FunctionReference<"mutation", "internal", {}, any, Name>;
+      claim: FunctionReference<
+        "mutation",
+        "internal",
+        { streamId: string },
+        { claimed: boolean },
+        Name
+      >;
       deleteStream: FunctionReference<
         "mutation",
         "internal",
@@ -54,6 +62,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           status: "pending" | "streaming" | "done" | "error" | "timeout";
           text: string;
         },
+        Name
+      >;
+      read: FunctionReference<
+        "query",
+        "internal",
+        { cursor: string | null; numItems: number; streamId: string },
+        StreamReadResult<string, string>,
         Name
       >;
       setStreamStatus: FunctionReference<
