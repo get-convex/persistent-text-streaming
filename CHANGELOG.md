@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4
+
+- Updates the /test entrypoint for compatibility with convex-test's new
+  `defineTestApp` capability.
+
 ## 0.3.3
 
 - Update ctx types for convex@1.41+
