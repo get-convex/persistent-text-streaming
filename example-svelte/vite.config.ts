@@ -8,8 +8,7 @@ export default defineConfig({
   plugins: [svelte(), tailwindcss()],
   resolve: {
     alias: {
-      "$lib": "/src/lib",
+      "@": "/src",
     },
   },
 });
-

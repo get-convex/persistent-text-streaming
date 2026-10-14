@@ -23,7 +23,7 @@
     "build": "tsc --project ./tsconfig.build.json",
     "build:codegen": "npx convex codegen --component-dir ./src/component && npm run build",
     "build:clean": "rm -rf dist *.tsbuildinfo && npm run build:codegen",
-    "typecheck": "tsc --noEmit && tsc -p example && tsc -p example/convex",
+    "typecheck": "tsc --noEmit && tsc -p example && tsc -p example/convex && svelte-check --tsconfig example-svelte/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run --typecheck",
     "test:watch": "vitest --typecheck --clearScreen false",
@@ -49,9 +49,9 @@
       "default": "./dist/react/index.js"
     },
     "./svelte": {
-      "types": "./src/svelte/index.svelte.ts",
-      "svelte": "./src/svelte/index.svelte.ts",
-      "default": "./src/svelte/index.svelte.ts"
+      "types": "./dist/svelte/index.svelte.d.ts",
+      "svelte": "./dist/svelte/index.svelte.js",
+      "default": "./dist/svelte/index.svelte.js"
     },
     "./test": "./src/test.ts",
     "./_generated/component.js": {
@@ -68,7 +68,7 @@
   },
   "peerDependencies": {
     "convex": "^1.32.0",
-    "convex-svelte": "^0.0.12",
+    "convex-svelte": ">=0.0.12 <0.16.0",
     "react": "~18.3.1 || ^19.0.0",
     "react-dom": "~18.3.1 || ^19.0.0",
     "svelte": "^5.0.0"
@@ -92,6 +92,7 @@
     "@edge-runtime/vm": "5.0.0",
     "@eslint/eslintrc": "3.3.5",
     "@eslint/js": "9.39.4",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@tailwindcss/vite": "4.2.2",
     "@types/node": "22.20.1",
     "@types/react": "19.2.14",
@@ -100,19 +101,22 @@
     "chokidar-cli": "3.0.0",
     "clsx": "2.1.1",
     "convex": "1.46.0",
-    "convex-svelte": "0.0.12",
+    "convex-svelte": "0.14.0",
     "convex-test": "0.0.61",
     "eslint": "9.39.4",
     "eslint-plugin-react-hooks": "7.0.1",
     "eslint-plugin-react-refresh": "0.5.2",
     "globals": "17.5.0",
+    "happy-dom": "20.14.5",
     "openai": "7.0.0",
     "pkg-pr-new": "0.0.66",
     "prettier": "3.8.3",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "react-markdown": "10.1.0",
-    "svelte": "5.33.0",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.6",
+    "svelte-exmarkdown": "5.0.2",
     "tailwind-merge": "3.5.0",
     "tailwindcss": "4.2.2",
     "typescript": "5.9.3",

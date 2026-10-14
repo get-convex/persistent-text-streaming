@@ -1,26 +1,29 @@
 /// Svelte helpers for persistent text streaming.
-
 import type { StreamStatus } from "../component/schema.js";
 import { useQuery } from "convex-svelte";
+import { untrack } from "svelte";
 import type { StreamBody, StreamId } from "../client/index.js";
 import type { FunctionReference } from "convex/server";
 
 /**
- * Svelte 5 rune-based hook for persistent text streaming.
+ * Svelte 5 version of the React `useStream` hook. Call it while a component
+ * initializes. Reactive inputs are getters so Svelte can track them.
  *
  * @param getPersistentBody - A query function reference that returns the body
  * of a stream using the component's `getStreamBody` method.
  * @param streamUrl - The URL of the http action that will kick off the stream
  * generation and stream the result back to the client using the component's
  * `stream` method.
- * @param getDriven - A getter function returning whether this particular session
- * is driving the stream. Return true if this is the client session that first
- * created the stream using the component's `createStream` method. If you're
- * simply reloading an existing stream, return false.
- * @param getStreamId - A getter function returning the ID of the stream. If this
- * returns undefined, the return value will be an empty string for the stream
- * body and the status will be `pending`.
- * @returns A reactive object with `text` and `status` properties.
+ * @param getDriven - Returns whether this particular session is driving the
+ * stream. Return true if this is the client session that first created the
+ * stream using the component's `createStream` method. If you're simply
+ * reloading an existing stream, return false.
+ * @param getStreamId - Returns the ID of the stream. While it returns
+ * undefined, the text is empty and the status is `pending`.
+ * @param getOpts - Returns request options. They are read when a stream
+ * starts, so a changed auth token applies to the next stream without
+ * aborting the current one.
+ * @returns A reactive object with the `text` and `status` of the stream.
  */
 export function useStream(
   getPersistentBody: FunctionReference<
@@ -32,86 +35,145 @@ export function useStream(
   streamUrl: URL,
   getDriven: () => boolean,
   getStreamId: () => StreamId | undefined,
-  opts?: {
+  getOpts?: () => {
     // If provided, this will be passed as the Authorization header.
     authToken?: string | null;
     // If provided, these will be passed as additional headers.
     headers?: Record<string, string>;
   },
-): { readonly text: string; readonly status: StreamStatus } {
-  // Svelte 5 runes for state management
-  let streamEnded = $state<boolean | null>(null);
+): Readonly<StreamBody> {
   let streamBody = $state("");
-  let streamStarted = $state(false);
+  let streamEnded = $state<boolean | null>(null);
+  // Set when this session drives a stream it already requested once.
+  let resumed = $state(false);
 
-  // Determine if we should use persistence (database) vs HTTP streaming
+  // Every stream ID this hook has POSTed. Aborting a request does not stop
+  // the backend writer, so a second POST for the same ID could start a
+  // second writer on the same stream. Holds one entry per stream seen.
+  const attempted = new Set<StreamId>();
+
+  // Deriveds only notify dependents when their value changes, so the effect
+  // below never re-runs because a getter re-ran with the same id.
+  const driven = $derived(getDriven());
+  const streamId = $derived(getStreamId());
+
   const usePersistence = $derived(
     // Something is wrong with the stream, so we need to use the database value.
     streamEnded === false ||
-    // If we're not driving the stream, we must use the database value.
-    !getDriven()
+      // The HTTP stream for this ID was already used, so only the database
+      // has the full text.
+      resumed ||
+      // If we're not driving the stream, we must use the database value.
+      !driven,
   );
 
-  // Query the persistent body from Convex when needed
-  const persistentBodyQuery = useQuery(
-    getPersistentBody,
-    () => {
-      const streamId = getStreamId();
-      return usePersistence && streamId ? { streamId } : "skip";
-    },
+  const persistentBody = useQuery(getPersistentBody, () =>
+    usePersistence && streamId ? { streamId } : "skip",
   );
 
-  // Kick off HTTP streaming when driven and streamId is available
+  // Effects only run in the browser, so SSR never sends the request.
   $effect(() => {
-    const driven = getDriven();
-    const streamId = getStreamId();
-
-    if (driven && streamId && !streamStarted) {
-      // Mark as started immediately to prevent double-execution
-      streamStarted = true;
-
-      // Kick off HTTP action
-      void (async () => {
-        const success = await startStreaming(
-          streamUrl,
-          streamId,
-          (text) => {
-            streamBody += text;
-          },
-          {
-            ...opts?.headers,
-            ...(opts?.authToken
-              ? { Authorization: `Bearer ${opts.authToken}` }
-              : {}),
-          },
-        );
-        streamEnded = success;
-      })();
+    if (!driven || !streamId) {
+      return;
     }
+
+    // Reset state from any previous stream.
+    streamBody = "";
+    streamEnded = null;
+    // Branch on a local, not on `resumed`: reading the state here would make
+    // the effect re-run, and abort the new stream, when it resets to false.
+    const isResume = attempted.has(streamId);
+    resumed = isResume;
+    if (isResume) {
+      return;
+    }
+    attempted.add(streamId);
+
+    const controller = new AbortController();
+    // Read every option untracked: a changed token or header applies to the
+    // next stream and must not abort the current one.
+    const headers = untrack(() => {
+      const opts = getOpts?.();
+      return {
+        "Content-Type": "application/json",
+        ...opts?.headers,
+        ...(opts?.authToken
+          ? { Authorization: `Bearer ${opts.authToken}` }
+          : {}),
+      };
+    });
+
+    void (async () => {
+      try {
+        const response = await fetch(streamUrl, {
+          method: "POST",
+          body: JSON.stringify({ streamId }),
+          headers,
+          signal: controller.signal,
+        });
+        // A response that settled just before teardown must not write into
+        // the state of the next stream.
+        if (controller.signal.aborted) return;
+
+        if (response.status === 205) {
+          console.error("Stream already finished", response);
+          streamEnded = false;
+          return;
+        }
+        if (!response.ok) {
+          console.error("Failed to reach streaming endpoint", response);
+          streamEnded = false;
+          return;
+        }
+        if (!response.body) {
+          console.error("No body in response", response);
+          streamEnded = false;
+          return;
+        }
+
+        const reader = response.body.getReader();
+        // One decoder per stream keeps multi-byte characters intact when they
+        // are split across chunks.
+        const decoder = new TextDecoder();
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (controller.signal.aborted) return;
+          const text = decoder.decode(value, { stream: !done });
+          if (text) {
+            streamBody += text;
+          }
+          if (done) {
+            streamEnded = true;
+            return;
+          }
+        }
+      } catch (e) {
+        if (!controller.signal.aborted) {
+          console.error("Error reading stream", e);
+          streamEnded = false;
+        }
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
   });
 
-  // Compute the final body based on persistence or streaming state
   const body = $derived.by((): StreamBody => {
-    const persistentBody = persistentBodyQuery.data;
-
-    if (persistentBody) {
-      return persistentBody;
+    if (persistentBody.data) {
+      return persistentBody.data;
     }
-
     let status: StreamStatus;
     if (streamEnded === null) {
       status = streamBody.length > 0 ? "streaming" : "pending";
     } else {
       status = streamEnded ? "done" : "error";
     }
-
-    return {
-      text: streamBody,
-      status: status as StreamStatus,
-    };
+    return { text: streamBody, status };
   });
 
-  // Return reactive getters
   return {
     get text() {
       return body.text;
@@ -120,59 +182,4 @@ export function useStream(
       return body.status;
     },
   };
-}
-
-/**
- * Internal helper for starting a stream.
- *
- * @param url - The URL of the http action that will kick off the stream
- * generation and stream the result back to the client using the component's
- * `stream` method.
- * @param streamId - The ID of the stream.
- * @param onUpdate - A function that updates the stream body.
- * @returns A promise that resolves to a boolean indicating whether the stream
- * was started successfully. It can fail if the http action is not found, or
- * CORS fails, or an exception is raised, or the stream is already running
- * or finished, etc.
- */
-async function startStreaming(
-  url: URL,
-  streamId: StreamId,
-  onUpdate: (text: string) => void,
-  headers: Record<string, string>,
-) {
-  const response = await fetch(url, {
-    method: "POST",
-    body: JSON.stringify({
-      streamId: streamId,
-    }),
-    headers: { "Content-Type": "application/json", ...headers },
-  });
-  // Adapted from https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams
-  if (response.status === 205) {
-    console.error("Stream already finished", response);
-    return false;
-  }
-  if (!response.ok) {
-    console.error("Failed to reach streaming endpoint", response);
-    return false;
-  }
-  if (!response.body) {
-    console.error("No body in response", response);
-    return false;
-  }
-  const reader = response.body.getReader();
-  while (true) {
-    try {
-      const { done, value } = await reader.read();
-      if (done) {
-        onUpdate(new TextDecoder().decode(value));
-        return true;
-      }
-      onUpdate(new TextDecoder().decode(value));
-    } catch (e) {
-      console.error("Error reading stream", e);
-      return false;
-    }
-  }
 }

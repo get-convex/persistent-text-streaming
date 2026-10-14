@@ -180,6 +180,35 @@ const { text, status } = useStream(
 );
 ```
 
+### Svelte (beta)
+
+Svelte 5 bindings are community-supported and in beta. They need `svelte` and
+[`convex-svelte`](https://github.com/get-convex/convex-svelte), with
+`setupConvex` called in a parent component. Reactive inputs are passed as
+getters. See [`example-svelte/`](./example-svelte/) for the chat app.
+
+```svelte
+<script lang="ts">
+  import { useStream } from "@convex-dev/persistent-text-streaming/svelte";
+
+  let { chat, driven }: { chat: Doc<"chats">; driven: boolean } = $props();
+
+  const stream = useStream(
+    api.chat.getChatBody,
+    new URL(`${convexSiteUrl}/chat-stream`),
+    () => driven,
+    () => chat.streamId as StreamId,
+    // Optional, read when a stream starts:
+    // () => ({ authToken, headers }),
+  );
+</script>
+
+<p>{stream.text}</p>
+```
+
+`stream.text` and `stream.status` update as the stream progresses. The HTTP
+request only starts in the browser, never during server-side rendering.
+
 ## Design Philosophy
 
 This component balances HTTP streaming with database persistence to try to

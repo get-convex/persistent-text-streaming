@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Doc } from "../../convex/_generated/dataModel";
+  import type { Doc } from "../../../example/convex/_generated/dataModel";
   import type { Snippet } from "svelte";
 
   let {

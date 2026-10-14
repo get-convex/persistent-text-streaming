@@ -1,23 +1,20 @@
 <script lang="ts">
   import { useQuery, useConvexClient } from "convex-svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import MessageItem from "./MessageItem.svelte";
   import ServerMessage from "./ServerMessage.svelte";
-  import { api } from "../../convex/_generated/api";
-  import type { Id } from "../../convex/_generated/dataModel";
+  import { api } from "../../../example/convex/_generated/api";
+  import type { Id } from "../../../example/convex/_generated/dataModel";
 
   const client = useConvexClient();
   const messages = useQuery(api.messages.listMessages, () => ({}));
 
-  // Use a plain object for better Svelte reactivity tracking
-  let drivenIds = $state<Record<string, boolean>>({});
+  // Messages this session sent, so only their streams are driven over HTTP.
+  const drivenIds = new SvelteSet<string>();
   let isStreaming = $state(false);
   let inputValue = $state("");
   let messagesEndRef = $state<HTMLDivElement | null>(null);
   let inputRef = $state<HTMLInputElement | null>(null);
-
-  function isDriven(id: string): boolean {
-    return drivenIds[id] === true;
-  }
 
   function focusInput() {
     inputRef?.focus();
@@ -48,8 +45,7 @@
       { prompt },
     );
 
-    // Use object spread to trigger reactivity
-    drivenIds = { ...drivenIds, [chatId]: true };
+    drivenIds.add(chatId);
     isStreaming = true;
   }
 
@@ -87,7 +83,7 @@
           <MessageItem {message} isUser={false}>
             <ServerMessage
               {message}
-              isDriven={isDriven(message._id)}
+              isDriven={drivenIds.has(message._id)}
               {stopStreaming}
               {scrollToBottom}
             />
