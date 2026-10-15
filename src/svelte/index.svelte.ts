@@ -162,6 +162,10 @@ export function useStream(
   });
 
   const body = $derived.by((): StreamBody => {
+    // The effect keeps the last stream's state, so hide it until a new ID.
+    if (!streamId) {
+      return { text: "", status: "pending" };
+    }
     if (persistentBody.data) {
       return persistentBody.data;
     }

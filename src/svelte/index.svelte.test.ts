@@ -122,6 +122,21 @@ describe("useStream (svelte)", () => {
     destroy();
   });
 
+  test("an undefined streamId shows empty text and pending", async () => {
+    const { response, controller } = controlledResponse();
+    fetchMock.mockResolvedValue(response);
+    const { props, stream, destroy } = render({ driven: true, streamId: "a" });
+
+    controller.enqueue(new TextEncoder().encode("done text"));
+    controller.close();
+    await vi.waitFor(() => expect(stream.status).toBe("done"));
+
+    props.streamId = undefined;
+    flushSync();
+    expect(stream).toMatchObject({ text: "", status: "pending" });
+    destroy();
+  });
+
   test("does not restart when the getter re-runs with the same streamId", () => {
     fetchMock.mockReturnValue(new Promise(() => {}));
     const message = $state({ current: { streamId: "a" } });
