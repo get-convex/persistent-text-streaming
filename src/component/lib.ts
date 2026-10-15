@@ -1,8 +1,7 @@
-import { paginator } from "convex-helpers/server/pagination";
 import { v } from "convex/values";
 import { internal } from "./_generated/api.js";
 import { internalMutation, mutation, query } from "./_generated/server.js";
-import schema, { streamStatusValidator } from "./schema.js";
+import { streamStatusValidator } from "./schema.js";
 
 // Create a new stream with zero chunks.
 export const createStream = mutation({
@@ -153,10 +152,13 @@ export const _deleteChunksPage = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const result = await paginator(ctx.db, schema)
+    // Cursors from the previous convex-helpers paginator were JSON arrays.
+    // Chunks are deleted as we go, so restarting from the beginning is safe.
+    const cursor = args.cursor?.startsWith("[") ? null : args.cursor;
+    const result = await ctx.db
       .query("chunks")
       .withIndex("byStream", (q) => q.eq("streamId", args.streamId))
-      .paginate({ cursor: args.cursor, numItems: DELETE_BATCH_SIZE });
+      .paginate({ cursor, numItems: DELETE_BATCH_SIZE });
 
     await Promise.all(result.page.map((chunk) => ctx.db.delete("chunks", chunk._id)));
 
