@@ -73,13 +73,14 @@ export function useStream(
 
   // Effects only run in the browser, so SSR never sends the request.
   $effect(() => {
+    // Reset state from any previous stream, also when this one is missing or
+    // not driven, so the body never shows the last stream's text.
+    streamBody = "";
+    streamEnded = null;
     if (!driven || !streamId) {
       return;
     }
 
-    // Reset state from any previous stream.
-    streamBody = "";
-    streamEnded = null;
     // Branch on a local, not on `resumed`: reading the state here would make
     // the effect re-run, and abort the new stream, when it resets to false.
     const isResume = attempted.has(streamId);
@@ -162,10 +163,6 @@ export function useStream(
   });
 
   const body = $derived.by((): StreamBody => {
-    // The effect keeps the last stream's state, so hide it until a new ID.
-    if (!streamId) {
-      return { text: "", status: "pending" };
-    }
     if (persistentBody.data) {
       return persistentBody.data;
     }

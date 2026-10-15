@@ -137,6 +137,25 @@ describe("useStream (svelte)", () => {
     destroy();
   });
 
+  test("switching to a stream this session does not drive hides the last one", async () => {
+    const { response, controller } = controlledResponse();
+    fetchMock.mockResolvedValue(response);
+    const { props, stream, destroy } = render({ driven: true, streamId: "a" });
+
+    controller.enqueue(new TextEncoder().encode("done text"));
+    controller.close();
+    await vi.waitFor(() => expect(stream.status).toBe("done"));
+
+    props.driven = false;
+    props.streamId = "b";
+    flushSync();
+    expect(stream).toMatchObject({ text: "", status: "pending" });
+
+    persisted.set("b", { text: "from the database", status: "done" });
+    expect(stream).toMatchObject({ text: "from the database", status: "done" });
+    destroy();
+  });
+
   test("does not restart when the getter re-runs with the same streamId", () => {
     fetchMock.mockReturnValue(new Promise(() => {}));
     const message = $state({ current: { streamId: "a" } });
