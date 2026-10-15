@@ -78,7 +78,7 @@
     "chokidar-cli": "3.0.0",
     "clsx": "2.1.1",
     "convex": "1.46.0",
-    "convex-test": "0.0.62",
+    "convex-test": "https://pkg.pr.new/convex-test@163",
     "eslint": "9.39.4",
     "eslint-plugin-react-hooks": "7.0.1",
     "eslint-plugin-react-refresh": "0.5.2",
@@ -97,8 +97,5 @@
     "vitest": "4.1.4"
   },
   "types": "./dist/client/index.d.ts",
-  "module": "./dist/client/index.js",
-  "dependencies": {
-    "convex-helpers": "^0.1.128"
-  }
+  "module": "./dist/client/index.js"
 }
